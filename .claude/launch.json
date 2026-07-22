@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "desktop-vite",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "desktop", "dev"],
+      "port": 1420
+    },
+    {
+      "name": "desktop-vite-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "desktop", "dev", "--port", "5183", "--strictPort"],
+      "port": 5183
+    }
+  ]
+}
