@@ -10,14 +10,24 @@ import {
   setAiSetting,
   isBrainReady,
   subscribeAiSettings,
-  CLAUDE_MODELS,
+  EFFORT_LEVELS,
   buildSystemPrompt,
 } from "../ai";
 import type { ChatMessage } from "../../types";
 import type { Mode, AiState } from "../../types";
-import { MERCURY_ICON_SVG, ANTHROPIC_ICON_SVG, LM_STUDIO_ICON_SVG } from "../../icons";
 
-/** Minimal external store — Monaco has no built-in place to stash UI state. */
+const EFFORT_SVGS: Record<string, string> = {
+  instant:
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>`,
+  low:
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/></svg>`,
+  medium:
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,17 10,11 14,15 20,9"/><polyline points="14,9 20,9 20,15"/></svg>`,
+  high:
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
+};
+
+
 class AiStore {
   private state: AiState | null = null;
   private listeners = new Set<() => void>();
@@ -161,8 +171,6 @@ function openAiEdit(editor: monaco.editor.ICodeEditor, store: AiStore) {
   store.open("edit", from, to, model.getValueInRange(selection));
 }
 
-const MAX_FULL_DOC = 8000;
-
 function withLineNumbers(text: string, startLine: number): string {
   return text
     .split("\n")
@@ -170,19 +178,52 @@ function withLineNumbers(text: string, startLine: number): string {
     .join("\n");
 }
 
-/** The current file's body (or a 60-line window around the selection), line-numbered. */
-function buildFileBody(model: monaco.editor.ITextModel, from: number, to: number): string {
-  const fullText = model.getValue();
-  if (fullText.length <= MAX_FULL_DOC) {
-    return withLineNumbers(fullText, 1);
+const MAX_COMPACT_CHARS = 4000;
+const COMPACT_HEAD_LINES = 12;
+const COMPACT_TAIL_LINES = 4;
+const COMPACT_SURROUND_LINES = 15;
+
+function buildCompactFileBody(model: monaco.editor.ITextModel, from: number, to: number): string {
+  const full = model.getValue();
+  const totalLines = model.getLineCount();
+  if (full.length <= MAX_COMPACT_CHARS) {
+    return withLineNumbers(full, 1);
   }
-  const startLine = model.getPositionAt(from).lineNumber;
-  const endLine = model.getPositionAt(to).lineNumber;
-  const winFromLine = Math.max(1, startLine - 30);
-  const winToLine = Math.min(model.getLineCount(), endLine + 30);
-  const winFrom = model.getOffsetAt({ lineNumber: winFromLine, column: 1 });
-  const winTo = model.getOffsetAt({ lineNumber: winToLine, column: model.getLineMaxColumn(winToLine) });
-  return withLineNumbers(fullText.slice(winFrom, winTo), winFromLine);
+  const selStartLine = model.getPositionAt(from).lineNumber;
+  const selEndLine = model.getPositionAt(to).lineNumber;
+
+  const parts: string[] = [];
+
+  const headEnd = Math.min(COMPACT_HEAD_LINES, selStartLine - 2);
+  if (headEnd > 0) {
+    const headText = model.getValueInRange(new monaco.Range(1, 1, headEnd, model.getLineMaxColumn(headEnd)));
+    parts.push(withLineNumbers(headText, 1));
+  }
+
+  if (headEnd < selStartLine - COMPACT_SURROUND_LINES - 1) {
+    parts.push(`// … ${selStartLine - COMPACT_SURROUND_LINES - headEnd - 1} lines omitted`);
+  }
+
+  const ctxFromLine = Math.max(1, selStartLine - COMPACT_SURROUND_LINES);
+  const ctxToLine = Math.min(totalLines, selEndLine + COMPACT_SURROUND_LINES);
+  const ctxText = model.getValueInRange(
+    new monaco.Range(ctxFromLine, 1, ctxToLine, model.getLineMaxColumn(ctxToLine)),
+  );
+  parts.push(withLineNumbers(ctxText, ctxFromLine));
+
+  if (ctxToLine < totalLines - COMPACT_TAIL_LINES) {
+    parts.push(`// … ${totalLines - COMPACT_TAIL_LINES - ctxToLine} lines omitted`);
+  }
+
+  if (COMPACT_TAIL_LINES > 0) {
+    const tailFrom = Math.max(ctxToLine + 1, totalLines - COMPACT_TAIL_LINES + 1);
+    const tailText = model.getValueInRange(
+      new monaco.Range(tailFrom, 1, totalLines, model.getLineMaxColumn(totalLines)),
+    );
+    parts.push(withLineNumbers(tailText, tailFrom));
+  }
+
+  return parts.join("\n");
 }
 
 const MAX_RELATED_FILES = 5;
@@ -249,17 +290,24 @@ function buildRequest(
   if (isFirst) {
     const lang = path ? languageLabelForPath(path) : "code";
     const relatedContext = buildRelatedFilesContext(model, path);
-    const fileBody = buildFileBody(model, state.originalFrom, state.originalTo);
+    const fileBody = buildCompactFileBody(model, state.originalFrom, state.originalTo);
     const startPos = model.getPositionAt(state.originalFrom);
     const endPos = model.getPositionAt(state.originalTo);
-    const empty = state.originalFrom === state.originalTo;
-    const selectionHeading = empty
-      ? `Cursor position: line ${startPos.lineNumber}, column ${startPos.column}`
-      : `Selection (lines ${startPos.lineNumber}-${endPos.lineNumber}):\n${state.originalText}`;
-    const label = state.mode === "edit" ? "Instruction" : "Question";
-    body =
-      `${relatedContext}Current file: ${path || "(untitled)"} (${lang})\n${fileBody}\n\n` +
-      `${selectionHeading}\n\n${label}: ${latest.content}`;
+    const hasSelection = state.originalFrom < state.originalTo && state.originalText.length > 0;
+
+    let context = `FILE: ${path || "(untitled)"} (${lang})\n\`\`\`${lang}\n${fileBody}\n\`\`\`\n\n`;
+    if (relatedContext) context = relatedContext + "\n" + context;
+
+    if (hasSelection) {
+      context +=
+        `SELECTED CODE (lines ${startPos.lineNumber}-${endPos.lineNumber}):\n` +
+        `\`\`\`${lang}\n${state.originalText}\n\`\`\`\n\n`;
+    } else {
+      context += `Cursor at line ${startPos.lineNumber}, column ${startPos.column}\n\n`;
+    }
+
+    const label = state.mode === "edit" ? "INSTRUCTION" : "QUESTION";
+    body = context + `${label}: ${latest.content}`;
   }
 
   const messages: ChatMessage[] = [
@@ -334,11 +382,9 @@ class SelectionPopover implements monaco.editor.IContentWidget {
   getPosition(): monaco.editor.IContentWidgetPosition | null {
     const selection = this.editor.getSelection();
     if (!selection || selection.isEmpty()) return null;
-    // Anchor at the selection's ACTIVE end (where the caret is): dragging
-    // down puts the popover near the bottom line, dragging up near the top.
     const pos = selection.getPosition();
     return {
-      position: { lineNumber: pos.lineNumber, column: pos.column },
+      position: { lineNumber: pos.lineNumber, column: 1 },
       preference: [
         monaco.editor.ContentWidgetPositionPreference.ABOVE,
         monaco.editor.ContentWidgetPositionPreference.BELOW,
@@ -357,91 +403,10 @@ interface HunkUi {
   insertAtEof: boolean;
   decorationIds: string[];
   zoneId: string | null;
-  actionWidget: HunkActionWidget | null;
   resolved: boolean;
 }
 
-class HunkActionWidget implements monaco.editor.IContentWidget {
-  allowEditorOverflow = true;
 
-  private static seq = 0;
-  private readonly id = `aether.aiEdit.hunk.${++HunkActionWidget.seq}`;
-  private root: HTMLDivElement;
-  private layoutListener: monaco.IDisposable;
-
-  constructor(
-    private editor: monaco.editor.IStandaloneCodeEditor,
-    index: number,
-    total: number,
-    private getAnchor: () => monaco.Range | null,
-    onApprove: () => void,
-    onReject: () => void,
-  ) {
-    this.root = document.createElement("div");
-    this.root.className = "aether-ai-hunk-actions";
-    this.root.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-
-    const pill = document.createElement("div");
-    pill.className = "aether-ai-hunk-pill";
-
-    const label = document.createElement("span");
-    label.className = "aether-ai-hunk-label";
-    label.innerHTML = `${index + 1} of ${total} <span class="aether-ai-chevron">⌄</span>`;
-
-    const reject = document.createElement("button");
-    reject.type = "button";
-    reject.className = "aether-ai-hunk-btn reject";
-    reject.title = "Undo this change (Ctrl+N)";
-    reject.append(document.createTextNode("Undo"), kbd("Ctrl+N"));
-    reject.addEventListener("click", onReject);
-
-    const approve = document.createElement("button");
-    approve.type = "button";
-    approve.className = "aether-ai-hunk-btn approve";
-    approve.title = "Keep this change (Ctrl+Shift+Y)";
-    approve.append(document.createTextNode("Keep"), kbd("Ctrl+Shift+Y"));
-    approve.addEventListener("click", onApprove);
-
-    pill.append(label, reject, approve);
-    this.root.appendChild(pill);
-
-    this.updateWidth();
-    this.layoutListener = this.editor.onDidLayoutChange(() => this.updateWidth());
-  }
-
-  private updateWidth() {
-    const info = this.editor.getLayoutInfo();
-    const width = info.contentWidth - 32;
-    this.root.style.width = `${width}px`;
-  }
-
-  dispose() {
-    this.layoutListener.dispose();
-  }
-
-  getId(): string {
-    return this.id;
-  }
-
-  getDomNode(): HTMLElement {
-    return this.root;
-  }
-
-  getPosition(): monaco.editor.IContentWidgetPosition | null {
-    const anchor = this.getAnchor();
-    if (!anchor) return null;
-    return {
-      position: { lineNumber: anchor.startLineNumber, column: 1 },
-      preference: [
-        monaco.editor.ContentWidgetPositionPreference.ABOVE,
-        monaco.editor.ContentWidgetPositionPreference.BELOW,
-      ],
-    };
-  }
-}
 
 
 
@@ -457,10 +422,14 @@ class AiWidget implements monaco.editor.IContentWidget {
   private modeDropdownBtn!: HTMLButtonElement;
   private modeLabel!: HTMLSpanElement;
   private modeMenu!: HTMLDivElement;
-  private brainSelect!: HTMLSelectElement;
-  private brainSelectWrapper!: HTMLDivElement;
-  private brainIcon!: HTMLSpanElement;
-  private brainSelectLabel!: HTMLSpanElement;
+  private effortTrigger!: HTMLButtonElement;
+  private effortIcon!: HTMLSpanElement;
+  private effortLabel!: HTMLSpanElement;
+  private effortMenu!: HTMLDivElement;
+  private questionSeparator!: HTMLDivElement;
+  private diffBar!: HTMLDivElement;
+  private transcriptExpandBtn!: HTMLButtonElement;
+  private expanded = false;
   private builtForGen = -1;
   private lastStreamRenderAt = 0;
 
@@ -557,10 +526,10 @@ class AiWidget implements monaco.editor.IContentWidget {
     const state = this.store.get();
     const model = this.editor.getModel();
     if (!state || !model) return null;
-    // The prompt bar always floats at the TOP of the selected / edited code.
     const anchorOffset = Math.min(state.from, model.getValueLength());
+    const pos = model.getPositionAt(anchorOffset);
     return {
-      position: model.getPositionAt(anchorOffset),
+      position: { lineNumber: pos.lineNumber, column: 1 },
       preference: [
         monaco.editor.ContentWidgetPositionPreference.ABOVE,
         monaco.editor.ContentWidgetPositionPreference.BELOW,
@@ -620,11 +589,6 @@ class AiWidget implements monaco.editor.IContentWidget {
         this.editor.changeViewZones((accessor) => accessor.removeZone(zoneId));
         ui.zoneId = null;
       }
-      if (ui.actionWidget) {
-        ui.actionWidget.dispose();
-        this.editor.removeContentWidget(ui.actionWidget);
-        ui.actionWidget = null;
-      }
     }
     this.hunks = [];
     this.diffActive = false;
@@ -676,13 +640,13 @@ class AiWidget implements monaco.editor.IContentWidget {
 
     if (hunks.length > 0) {
       const baseLine = model.getPositionAt(state.from).lineNumber;
-      hunks.forEach((hunk, index) => {
-        this.renderHunk(baseLine, hunk, index, hunks.length);
+      hunks.forEach((hunk) => {
+        this.renderHunk(baseLine, hunk);
       });
     }
   }
 
-  private renderHunk(baseLine: number, hunk: DiffHunk, index: number, total: number) {
+  private renderHunk(baseLine: number, hunk: DiffHunk) {
     const model = this.model();
     if (!model) return;
     const lineCount = model.getLineCount();
@@ -696,7 +660,6 @@ class AiWidget implements monaco.editor.IContentWidget {
       insertAtEof: pureDeletionAtEof,
       decorationIds: [],
       zoneId: null,
-      actionWidget: null,
       resolved: false,
     };
 
@@ -739,19 +702,6 @@ class AiWidget implements monaco.editor.IContentWidget {
         });
       });
     }
-
-    ui.actionWidget = new HunkActionWidget(
-      this.editor,
-      index,
-      total,
-      () => {
-        const m = this.model();
-        return m && ui.decorationIds.length ? m.getDecorationRange(ui.decorationIds[0]) : null;
-      },
-      () => this.approveHunk(ui),
-      () => this.rejectHunk(ui),
-    );
-    this.editor.addContentWidget(ui.actionWidget);
 
     this.hunks.push(ui);
   }
@@ -827,15 +777,10 @@ class AiWidget implements monaco.editor.IContentWidget {
     this.afterHunkResolve();
   }
 
-  /** Re-anchor the surviving pills + prompt bar after a hunk resolve moved text. */
   private afterHunkResolve() {
-    for (const h of this.hunks) {
-      if (!h.resolved && h.actionWidget) this.editor.layoutContentWidget(h.actionWidget);
-    }
     this.editor.layoutContentWidget(this);
   }
 
-  /** Remove one hunk's decorations/zone/pill from the CURRENT model. */
   private dropHunkUi(ui: HunkUi) {
     if (ui.decorationIds.length) {
       ui.decorationIds = this.editor.deltaDecorations(ui.decorationIds, []);
@@ -844,11 +789,6 @@ class AiWidget implements monaco.editor.IContentWidget {
       const zoneId = ui.zoneId;
       this.editor.changeViewZones((accessor) => accessor.removeZone(zoneId));
       ui.zoneId = null;
-    }
-    if (ui.actionWidget) {
-      ui.actionWidget.dispose();
-      this.editor.removeContentWidget(ui.actionWidget);
-      ui.actionWidget = null;
     }
   }
 
@@ -953,6 +893,21 @@ class AiWidget implements monaco.editor.IContentWidget {
     this.transcript = document.createElement("div");
     this.transcript.className = "aether-ai-transcript scroll-thin";
 
+    this.transcriptExpandBtn = document.createElement("button");
+    this.transcriptExpandBtn.type = "button";
+    this.transcriptExpandBtn.className = "aether-ai-expand-btn";
+    this.transcriptExpandBtn.title = "Expand transcript";
+    this.transcriptExpandBtn.innerHTML =
+      `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+    this.transcriptExpandBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleExpand();
+    });
+    this.transcript.appendChild(this.transcriptExpandBtn);
+
+    this.questionSeparator = document.createElement("div");
+    this.questionSeparator.className = "aether-ai-separator";
+
     this.breadcrumb = document.createElement("div");
     this.breadcrumb.className = "aether-ai-breadcrumb";
 
@@ -968,29 +923,32 @@ class AiWidget implements monaco.editor.IContentWidget {
       this.sendBtn.disabled = this.input.value.trim().length === 0;
     });
 
-    // Model Selector (placed inside inputRow, bottom-left)
-    this.brainSelectWrapper = document.createElement("div");
-    this.brainSelectWrapper.className = "aether-ai-brain-wrapper";
+    // Effort selector (placed inside inputRow, bottom-left)
+    this.effortTrigger = document.createElement("button");
+    this.effortTrigger.type = "button";
+    this.effortTrigger.className = "aether-ai-effort-trigger";
+    this.effortTrigger.title = "Reasoning effort";
 
-    this.brainIcon = document.createElement("span");
-    this.brainIcon.className = "aether-ai-brain-icon";
+    this.effortIcon = document.createElement("span");
+    this.effortIcon.className = "aether-ai-effort-icon";
 
-    this.brainSelectLabel = document.createElement("span");
-    this.brainSelectLabel.className = "aether-ai-brain-label";
+    this.effortLabel = document.createElement("span");
+    this.effortLabel.className = "aether-ai-effort-label";
 
-    this.brainSelect = document.createElement("select");
-    this.brainSelect.className = "aether-ai-brain";
-    this.brainSelect.title = "Model";
-    this.brainSelect.addEventListener("change", this.onBrainChange);
-    this.brainSelect.addEventListener("click", (e) => e.stopPropagation());
-    this.brainSelect.addEventListener("mousedown", (e) => e.stopPropagation());
+    const effortChevron = document.createElement("span");
+    effortChevron.className = "aether-ai-effort-chevron";
+    effortChevron.textContent = "⌄";
 
-    const brainChevron = document.createElement("span");
-    brainChevron.className = "aether-ai-brain-chevron";
-    brainChevron.textContent = "⌄";
+    this.effortTrigger.append(this.effortIcon, this.effortLabel, effortChevron);
+    this.effortTrigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleEffortMenu();
+    });
 
-    this.brainSelectWrapper.append(this.brainIcon, this.brainSelectLabel, this.brainSelect, brainChevron);
-    this.renderBrainOptions();
+    this.effortMenu = document.createElement("div");
+    this.effortMenu.className = "aether-ai-effort-menu";
+    this.effortMenu.hidden = true;
+    this.renderEffortOptions();
 
     this.modeDropdownBtn = document.createElement("button");
     this.modeDropdownBtn.className = "aether-ai-mode-dropdown";
@@ -1018,13 +976,16 @@ class AiWidget implements monaco.editor.IContentWidget {
       }
     });
 
-    inputRow.append(this.input, this.brainSelectWrapper, this.modeDropdownBtn, this.modeMenu, this.sendBtn);
+    inputRow.append(this.input, this.effortTrigger, this.effortMenu, this.modeDropdownBtn, this.modeMenu, this.sendBtn);
 
     this.footer = document.createElement("div");
     this.footer.className = "aether-ai-footer";
 
-    // closeCorner is appended last to ensure it sits on top in DOM order
-    this.root.append(this.transcript, this.breadcrumb, inputRow, this.footer, closeCorner);
+    this.diffBar = document.createElement("div");
+    this.diffBar.className = "aether-ai-diff-bar";
+    this.diffBar.hidden = true;
+
+    this.root.append(this.diffBar, this.transcript, this.questionSeparator, this.breadcrumb, inputRow, this.footer, closeCorner);
 
     this.render(state);
     requestAnimationFrame(() => {
@@ -1103,69 +1064,64 @@ class AiWidget implements monaco.editor.IContentWidget {
     );
   }
 
-  private onBrainChange = () => {
-    const value = this.brainSelect.value;
-    if (value === "mercury") {
-      setAiSetting("brain", "mercury");
-    } else if (value.startsWith("claude:")) {
-      setAiSetting("brain", "claude");
-      setAiSetting("claudeModel", value.slice("claude:".length));
+  private toggleEffortMenu() {
+    if (this.effortMenu.hidden) {
+      this.effortMenu.hidden = false;
+      document.addEventListener("mousedown", this.outsideEffortClick, true);
     } else {
-      setAiSetting("brain", "lmstudio");
-      if (!getAiSettings().lmStudioModel) {
-        window.dispatchEvent(new CustomEvent("aether:open-ai-settings"));
-      }
+      this.closeEffortMenu();
     }
-    this.renderBrainOptions();
+  }
+
+  private closeEffortMenu() {
+    this.effortMenu.hidden = true;
+    document.removeEventListener("mousedown", this.outsideEffortClick, true);
+  }
+
+  private outsideEffortClick = (e: MouseEvent) => {
+    if (!this.effortMenu.contains(e.target as Node) && e.target !== this.effortTrigger) {
+      this.closeEffortMenu();
+    }
   };
 
-  private updateBrainIcon() {
-    if (!this.brainIcon || !this.brainSelectLabel) return;
-    const s = getAiSettings();
-    if (s.brain === "mercury") {
-      this.brainIcon.innerHTML = MERCURY_ICON_SVG;
-      this.brainSelectLabel.textContent = "Mercury 2";
-    } else if (s.brain === "claude") {
-      this.brainIcon.innerHTML = ANTHROPIC_ICON_SVG;
-      const activeModel = CLAUDE_MODELS.find(m => m.id === s.claudeModel);
-      this.brainSelectLabel.textContent = activeModel ? activeModel.label : s.claudeModel;
-    } else {
-      this.brainIcon.innerHTML = LM_STUDIO_ICON_SVG;
-      this.brainSelectLabel.textContent = s.lmStudioModel ? `LM Studio · ${s.lmStudioModel}` : "LM Studio…";
+  private renderEffortOptions() {
+    const current = getAiSettings().reasoningEffort;
+    this.effortMenu.replaceChildren();
+
+    const updateIcon = (id: string) => {
+      this.effortIcon.innerHTML = EFFORT_SVGS[id] || "";
+      this.effortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === id)?.label || id;
+    };
+
+    for (const level of EFFORT_LEVELS) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "aether-ai-effort-item";
+      if (level.id === current) item.classList.add("active");
+
+      const icon = document.createElement("span");
+      icon.className = "aether-ai-effort-item-icon";
+      icon.innerHTML = EFFORT_SVGS[level.id] || "";
+
+      const label = document.createElement("span");
+      label.className = "aether-ai-effort-item-label";
+      label.textContent = level.label;
+
+      item.append(icon, label);
+      item.addEventListener("click", () => {
+        setAiSetting("reasoningEffort", level.id);
+        this.closeEffortMenu();
+        updateIcon(level.id);
+      });
+      this.effortMenu.appendChild(item);
     }
+
+    updateIcon(current);
   }
 
-  private renderBrainOptions() {
-    const s = getAiSettings();
-    this.brainSelect.replaceChildren();
-
-    const mercury = document.createElement("option");
-    mercury.value = "mercury";
-    mercury.textContent = "Mercury 2";
-    this.brainSelect.appendChild(mercury);
-
-    for (const m of CLAUDE_MODELS) {
-      const opt = document.createElement("option");
-      opt.value = `claude:${m.id}`;
-      opt.textContent = m.label;
-      this.brainSelect.appendChild(opt);
-    }
-
-    const lm = document.createElement("option");
-    lm.value = "lmstudio";
-    lm.textContent = s.lmStudioModel ? `LM Studio · ${s.lmStudioModel}` : "LM Studio…";
-    this.brainSelect.appendChild(lm);
-
-    this.brainSelect.value =
-      s.brain === "mercury" ? "mercury" : s.brain === "claude" ? `claude:${s.claudeModel}` : "lmstudio";
-
-    this.updateBrainIcon();
-  }
-
-  /** Re-sync the model dropdown when settings are changed in AI Settings. */
-  public refreshBrain() {
-    if (this.builtForGen < 0 || !this.brainSelect) return;
-    this.renderBrainOptions();
+  public refreshEffort() {
+    if (this.builtForGen < 0 || !this.effortTrigger) return;
+    this.renderEffortOptions();
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -1247,6 +1203,16 @@ class AiWidget implements monaco.editor.IContentWidget {
     return btn;
   }
 
+  private toggleExpand() {
+    this.expanded = !this.expanded;
+    this.root.classList.toggle("expanded", this.expanded);
+    this.transcriptExpandBtn.title = this.expanded ? "Collapse transcript" : "Expand transcript";
+    this.transcriptExpandBtn.innerHTML = this.expanded
+      ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 4 20"/><polyline points="20 10 14 10 20 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>`
+      : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+    this.editor.layoutContentWidget(this);
+  }
+
   private render(state: AiState) {
     const idle = state.turns.length === 0 && state.status === "input";
     this.root.classList.toggle("idle", idle);
@@ -1255,11 +1221,14 @@ class AiWidget implements monaco.editor.IContentWidget {
     this.renderMenu();
 
     if (state.mode === "question") {
-      this.transcript.style.display = state.turns.length > 0 || state.status === "streaming" ? "" : "none";
+      const hasContent = state.turns.length > 0 || state.status === "streaming";
+      this.transcript.style.display = hasContent ? "" : "none";
+      this.questionSeparator.style.display = hasContent ? "" : "none";
       this.breadcrumb.style.display = "none";
       this.renderTranscript(state);
     } else {
       this.transcript.style.display = "none";
+      this.questionSeparator.style.display = "none";
       this.renderBreadcrumb(state);
     }
 
@@ -1285,10 +1254,34 @@ class AiWidget implements monaco.editor.IContentWidget {
       this.sendBtn.title = "Send (Enter)";
     }
 
+    // --- diff bar (top of widget) ---
+    if (state.mode === "edit" && this.diffActive) {
+      const unresolved = this.hunks.filter((h) => !h.resolved).length;
+      this.diffBar.hidden = false;
+      this.diffBar.replaceChildren();
+      const count = document.createElement("span");
+      count.className = "aether-ai-diff-count";
+      count.textContent = `${unresolved} change${unresolved !== 1 ? "s" : ""}`;
+      const actions = document.createElement("div");
+      actions.className = "aether-ai-diff-actions";
+      const rejectBtn = document.createElement("button");
+      rejectBtn.type = "button";
+      rejectBtn.className = "aether-ai-diff-reject";
+      rejectBtn.textContent = "Reject all";
+      rejectBtn.addEventListener("click", this.close);
+      const acceptBtn = document.createElement("button");
+      acceptBtn.type = "button";
+      acceptBtn.className = "aether-ai-diff-accept";
+      acceptBtn.textContent = "Accept all";
+      acceptBtn.addEventListener("click", this.accept);
+      actions.append(rejectBtn, acceptBtn);
+      this.diffBar.append(count, actions);
+    } else {
+      this.diffBar.hidden = true;
+    }
+
     this.footer.replaceChildren();
-    const isBrainDisabled = state.status === "streaming";
-    this.brainSelect.disabled = isBrainDisabled;
-    this.brainSelectWrapper.classList.toggle("disabled", isBrainDisabled);
+    this.effortTrigger.disabled = state.status === "streaming";
 
     if (state.status === "error") {
       this.footer.append(
@@ -1299,12 +1292,6 @@ class AiWidget implements monaco.editor.IContentWidget {
       );
     } else if (state.status === "streaming") {
       this.footer.append(hint("Generating…  Esc to dismiss"));
-    } else if (state.mode === "edit" && this.diffActive) {
-      this.footer.append(
-        spacerEl(),
-        this.actionButton("Reject all  Esc", "ghost", this.close),
-        this.actionButton("Approve all  ⏎", "primary", this.accept),
-      );
     } else if (state.mode === "edit" && this.noChanges && state.turns.length > 0) {
       this.footer.append(hint("No changes proposed"));
     }
@@ -1332,7 +1319,7 @@ function ensureStyleInjected() {
   style.textContent = `
 .aether-ai-widget {
   position: relative;
-  width: min(460px, calc(100vw - 16px));
+  width: min(600px, calc(100vw - 16px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1377,10 +1364,41 @@ function ensureStyleInjected() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 220px;
+  max-height: 300px;
   overflow-y: auto;
   scroll-behavior: smooth;
   padding-right: 20px;
+  position: relative;
+}
+.aether-ai-expand-btn {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  align-self: flex-end;
+  margin-bottom: -20px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #71717a;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  outline: none !important;
+}
+.aether-ai-expand-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+.aether-ai-widget.expanded {
+  width: min(680px, calc(100vw - 16px));
+}
+.aether-ai-widget.expanded .aether-ai-transcript {
+  max-height: min(60vh, 600px);
 }
 .aether-ai-transcript::-webkit-scrollbar {
   width: 6px;
@@ -1436,7 +1454,12 @@ function ensureStyleInjected() {
   overflow-x: auto;
   white-space: nowrap;
 }
-.aether-ai-input-row { position: relative; }
+.aether-ai-input-row {
+  position: relative;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+  margin-top: 4px;
+}
 .aether-ai-input {
   width: 100%;
   resize: none;
@@ -1476,7 +1499,7 @@ function ensureStyleInjected() {
 .aether-ai-chevron { font-size: 10px; opacity: 0.8; }
 .aether-ai-mode-menu {
   position: absolute;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
   right: 0;
   z-index: 1000 !important;
   display: flex;
@@ -1615,6 +1638,51 @@ function ensureStyleInjected() {
 .aether-ai-action.primary:hover { background: #a0a7ff; }
 .aether-ai-action.ghost { background: rgba(255,255,255,0.06); color: #d4d4d8; }
 .aether-ai-action.ghost:hover { background: rgba(255,255,255,0.12); }
+.aether-ai-diff-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.aether-ai-diff-count {
+  color: #a1a1aa;
+  font-weight: 500;
+}
+.aether-ai-diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.aether-ai-diff-reject,
+.aether-ai-diff-accept {
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.aether-ai-diff-reject {
+  background: rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+}
+.aether-ai-diff-reject:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+.aether-ai-diff-accept {
+  background: rgba(139, 147, 255, 0.15);
+  color: #a0a7ff;
+}
+.aether-ai-diff-accept:hover {
+  background: rgba(139, 147, 255, 0.25);
+  color: #c4c9ff;
+}
 .aether-ai-diff-added { background: rgba(74,222,128,0.10); }
 .aether-ai-diff-zone {
   font-family: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1677,66 +1745,110 @@ function ensureStyleInjected() {
   color: #3f3f46;
   background: rgba(255, 255, 255, 0.02);
 }
-.aether-ai-hunk-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  pointer-events: none;
-}
-.aether-ai-hunk-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 4px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #09090b;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  pointer-events: auto;
-}
-.aether-ai-hunk-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  color: #a1a1aa;
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.aether-ai-hunk-btn {
+
+
+/* ── Effort selector ─────────────────────────────────────────────── */
+.aether-ai-effort-trigger {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
-  border: none;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s;
-}
-.aether-ai-hunk-btn .aether-ai-kbd {
-  font-size: 9px;
-  padding: 1px 4px;
-}
-.aether-ai-hunk-btn.reject {
-  background: transparent;
+  padding: 0 7px 0 5px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
   color: #a1a1aa;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: inherit;
+  font-size: 11.5px;
 }
-.aether-ai-hunk-btn.reject:hover {
-  background: rgba(255, 255, 255, 0.06);
+.aether-ai-effort-trigger:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
   color: #e4e4e7;
 }
-.aether-ai-hunk-btn.approve {
-  background: rgba(139, 147, 255, 0.15);
-  color: #a0a7ff;
+.aether-ai-effort-trigger:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.aether-ai-hunk-btn.approve:hover {
-  background: rgba(139, 147, 255, 0.25);
+.aether-ai-effort-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  line-height: 0;
+}
+.aether-ai-effort-label {
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.aether-ai-effort-chevron {
+  font-size: 10px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+.aether-ai-effort-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 1000 !important;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #09090b;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.aether-ai-effort-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  outline: none !important;
+  font-family: inherit;
+}
+.aether-ai-effort-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+.aether-ai-effort-item.active {
   color: #c4c9ff;
+}
+.aether-ai-effort-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  opacity: 0.7;
+}
+.aether-ai-effort-item.active .aether-ai-effort-item-icon {
+  opacity: 1;
+}
+
+/* ── Question mode separator ────────────────────────────────────── */
+.aether-ai-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 0 2px;
+  flex-shrink: 0;
 }
 `;
   document.head.appendChild(style);
@@ -1827,8 +1939,8 @@ export function installAiEdit(editor: monaco.editor.IStandaloneCodeEditor, getPa
     updatePopover();
   });
 
-  // Keep the footer model dropdown in sync with the AI Settings dialog.
-  subscribeAiSettings(() => widget.refreshBrain());
+  // Keep the effort selector in sync with the AI Settings dialog.
+  subscribeAiSettings(() => widget.refreshEffort());
 
   // Dev-only: lets the browser preview simulate a completed assistant turn to
   // exercise the hunk UI without a Tauri backend.

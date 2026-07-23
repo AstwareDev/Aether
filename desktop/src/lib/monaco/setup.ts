@@ -1,18 +1,5 @@
-// Explicit ".js" extensions below work around a TS "bundler" module-resolution
-// quirk: it strips what it thinks is a file extension (e.g. the ".api" in
-// "editor.api") before consulting monaco-editor's `"./*"` exports wildcard,
-// which then fails to match the real on-disk file. Vite resolves these paths
-// identically with or without the extension, so this is a no-op at runtime.
-// No separate "editor.main.css" exists in this modular esm layout — each
-// contribution module below imports the specific CSS (codicons, widgets,
-// etc.) it actually needs, so nothing extra to pull in here.
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 
-// Tokenizer + bracket/comment config for (almost) every language Monaco
-// ships. Each of these is just an id + a lazy-loaded grammar module, so
-// registering all of them costs near-nothing until a file of that language
-// is actually opened — same reasoning that justified a smaller curated list
-// before; there's no real benefit to curating since the cost is ~free.
 import "monaco-editor/esm/vs/basic-languages/abap/abap.contribution.js";
 import "monaco-editor/esm/vs/basic-languages/apex/apex.contribution.js";
 import "monaco-editor/esm/vs/basic-languages/azcli/azcli.contribution.js";
@@ -95,11 +82,6 @@ import "monaco-editor/esm/vs/basic-languages/wgsl/wgsl.contribution.js";
 import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js";
 import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js";
 
-// Worker-backed rich IntelliSense layered on top of the languages above.
-// JSON has no basic-languages entry — its contribution is self-contained.
-// (jsonDefaults/typescriptDefaults etc. are real named exports of these
-// modules at runtime — see monaco-shims.d.ts for why they need a local
-// ambient declaration to type-check.)
 import { jsonDefaults } from "monaco-editor/esm/vs/language/json/monaco.contribution.js";
 import {
   ScriptTarget,
@@ -148,11 +130,6 @@ import tailwindWorker from "monaco-tailwind/tailwind.worker?worker";
   },
 };
 
-// Offline desktop app: validate JSON but never fetch schemas over the network.
-// Schemas are vendored locally (desktop/src/lib/monaco/schemas/) and inlined
-// via `schema` rather than fetched via `uri` — `enableSchemaRequest: false`
-// blocks any accidental network fetch of a schema's own internal $refs too,
-// but both vendored schemas here only use in-document "#/definitions/..." refs.
 jsonDefaults.setDiagnosticsOptions({
   validate: true,
   enableSchemaRequest: false,
@@ -180,46 +157,19 @@ const tsCompilerOptions = {
 typescriptDefaults.setCompilerOptions(tsCompilerOptions);
 javascriptDefaults.setCompilerOptions(tsCompilerOptions);
 
-// Real React/ReactDOM types so hovers/completions in .tsx/.jsx files show
-// actual signatures instead of `any` (allowJs means .jsx files benefit too).
 registerReactTypes(typescriptDefaults);
 registerReactTypes(javascriptDefaults);
 
-// monaco-tailwind reaches into the deprecated aggregate-bundle path
-// `monaco.languages.css.cssDefaults` (empty/absent since we import our
-// lightweight `editor.api` core, not the full `monaco-editor` barrel) — shim
-// just that one property path with the real `cssDefaults` instance we
-// already imported above, so its internal `.options`/`.setOptions()` calls
-// work unmodified.
 (monaco.languages as unknown as { css: { cssDefaults: typeof cssDefaults } }).css = { cssDefaults };
 
-// Tailwind v4 class-name completion, hover, and color swatches. Detected
-// automatically by the worker from the content of open documents (Tailwind
-// v4's config lives in CSS itself, e.g. `@import "tailwindcss"` + `@theme`)
-// — there's no separate per-workspace config step to wire up.
-// `as any`: monaco-tailwind types this against its own nested monaco-editor
-// dependency (a different resolved version than ours), so the two "typeof
-// import('monaco-editor')" types are nominally distinct even though our
-// lightweight object is structurally a superset of everything it actually
-// touches at runtime (verified by reading its source, not just its types).
 configureMonacoTailwindcss(monaco as any, {
   languageSelector: ["css", "scss", "less", "html", "javascript", "typescript"],
 });
 
-// Full Emmet abbreviation support (`.class`, `a.class`, `!`, `ul>li*3`, etc.)
-// — the real Emmet engine, not a hand-picked subset of shortcuts. `javascript`
-// and `typescript` cover `.jsx`/`.tsx` too, since editorLanguage.ts maps both
-// extensions of each pair onto the same language id.
-// `as any`: same reason as configureMonacoTailwindcss above — emmet-monaco-es
-// types its `monaco` param against the full `editor.main` barrel, but only
-// ever touches `Range`, `languages.registerCompletionItemProvider`,
-// `CompletionItemKind`, and `CompletionItemInsertTextRule`, all present on
-// our lightweight `editor.api` core.
 emmetHTML(monaco as any, ["html"]);
 emmetCSS(monaco as any, ["css", "scss", "less"]);
 emmetJSX(monaco as any, ["javascript", "typescript"]);
 
-/** Matches the app chrome so the editor blends with the shell. */
 monaco.editor.defineTheme("aether-dark", {
   base: "vs-dark",
   inherit: true,
@@ -261,8 +211,6 @@ monaco.editor.defineTheme("aether-dark", {
   },
 });
 
-// Register a lightweight "diff" language tokenizer for unified-diff syntax
-// highlighting (not bundled in monaco-editor's basic-languages set).
 monaco.languages.register({ id: "diff" });
 monaco.languages.setMonarchTokensProvider("diff", {
   tokenizer: {

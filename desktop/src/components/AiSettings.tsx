@@ -39,7 +39,7 @@ export default function AiSettings({ open, onClose }: AiSettingsProps) {
 
   // Pull the LM Studio model list when the dialog opens on that brain.
   useEffect(() => {
-    if (open && s.brain === "lmstudio") void refreshModels();
+    if (open && s.brain === "lm-studio") void refreshModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, s.brain]);
 

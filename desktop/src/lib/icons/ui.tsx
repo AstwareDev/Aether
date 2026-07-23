@@ -22,9 +22,6 @@ import {
 } from "@react-symbols/icons/fluent";
 import type { UIIconProps, SvgComp } from "../../types";
 
-// The Fluent set is monochrome (currentColor), so color follows CSS `color`
-// (Tailwind text-*). We normalize sizing behind a small wrapper.
-
 function make(Icon: SvgComp) {
   return function UIIcon({ size = 16, className }: UIIconProps) {
     return <Icon width={size} height={size} style={{ width: size, height: size }} className={className} />;
@@ -51,3 +48,51 @@ export const AddIcon = make(FluentAdd);
 export const SplitIcon = make(FluentSplitVertical);
 export const TrashIcon = make(FluentTrash);
 export const LayoutIcon = make(FluentEditorLayout);
+
+export const CaseSensitiveIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M3.5 4h2l2.5 7h-1.5l-.5-1.5h-2.5l-.5 1.5h-1.5l2.5-7zm1 1.5l-.75 2.5h1.5l-.75-2.5zm6.5-1.5h1.5v2h.5c.83 0 1.5.67 1.5 1.5v2c0 .83-.67 1.5-1.5 1.5h-2v-7zm1.5 3.5v2h.5c.28 0 .5-.22.5-.5v-1c0-.28-.22-.5-.5-.5h-.5z"/>
+  </svg>
+);
+
+export const WholeWordIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M1 4h2l1 4 1-4h2l1 4 1-4h2l-2 7h-2l-1-4-1 4h-2l-2-7z"/>
+  </svg>
+);
+
+export const RegexIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M2 4.5c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1zm3 0c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1zm-3 3c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1zm3 0c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1zm3-3c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1zm3 0c0-.28.22-.5.5-.5h1c.28 0 .5.22.5.5v1c0 .28-.22.5-.5.5h-1c-.28 0-.5-.22-.5-.5v-1z"/>
+  </svg>
+);
+
+export const ChevronDownIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
+  </svg>
+);
+
+export const ChevronRightIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M7.427 4.427l3.396 3.396a.25.25 0 010 .354l-3.396 3.396A.25.25 0 017 11.396V4.604a.25.25 0 01.427-.177z"/>
+  </svg>
+);
+
+export const ClearIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.708.708L7.293 8l-3.647 3.646.708.707L8 8.707z"/>
+  </svg>
+);
+
+export const ReplaceIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M3 3h8v1.5h-8v-1.5zm0 3h8v1.5h-8v-1.5zm0 3h5v1.5h-5v-1.5zm9-2.5v3.5h1.5v-3.5h1.5l-2.25-2.25-2.25 2.25h1.5z"/>
+  </svg>
+);
+
+export const ReplaceAllIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+    <path d="M2 2h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1zm-9 4.5h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1z"/>
+  </svg>
+);

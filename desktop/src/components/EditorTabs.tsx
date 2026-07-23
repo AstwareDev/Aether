@@ -1,8 +1,10 @@
 import { memo } from "react";
 import { AnimatePresence, motion, Reorder } from "motion/react";
 import { FileTypeIcon } from "../lib/icons";
+import { SettingsIcon } from "../lib/icons/ui";
 import { CloseGlyph, DiffGlyph } from "../icons";
 import { baseName } from "../lib/fs";
+import { SETTINGS_URI } from "../types";
 import type { EditorTabsProps } from "../types";
 
 const DIFF_PREFIX = "diff:";
@@ -13,6 +15,12 @@ function isDiffPath(p: string): boolean {
 
 function realPathFromDiff(p: string): string {
   return p.slice(DIFF_PREFIX.length);
+}
+
+function tabLabel(path: string): string {
+  if (path === SETTINGS_URI) return "Settings";
+  if (isDiffPath(path)) return baseName(realPathFromDiff(path));
+  return baseName(path);
 }
 
 export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, onReorder }: EditorTabsProps) {
@@ -30,7 +38,8 @@ export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, o
         {tabs.map((tab) => {
           const active = tab.path === activePath;
           const diff = isDiffPath(tab.path);
-          const displayName = diff ? baseName(realPathFromDiff(tab.path)) : baseName(tab.path);
+          const settings = tab.path === SETTINGS_URI;
+          const displayName = tabLabel(tab.path);
           return (
             <Reorder.Item
               as="div"
@@ -65,7 +74,7 @@ export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, o
                   transition={{ type: "spring", stiffness: 550, damping: 42 }}
                 />
               )}
-              {diff ? <DiffGlyph /> : <FileTypeIcon name={baseName(tab.path)} className="shrink-0" />}
+              {settings ? <SettingsIcon size={14} className="shrink-0" /> : diff ? <DiffGlyph /> : <FileTypeIcon name={baseName(tab.path)} className="shrink-0" />}
               <span className="truncate">{displayName}</span>
               {diff && <span className="shrink-0 text-[10px] text-sky-500">diff</span>}
               <button

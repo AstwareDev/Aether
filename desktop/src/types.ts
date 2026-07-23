@@ -29,8 +29,12 @@ export interface UIIconProps {
 
 export type SvgComp = FC<SVGProps<SVGSVGElement>>;
 
-// ── lib/icons/flow.tsx ────────────────────────────────────────────────
-export interface FlowManifest {
+// ── Virtual URIs ──────────────────────────────────────────────────────
+export const SETTINGS_URI = "aether:settings";
+export type LayoutMode = "vscode" | "aether" | "compact";
+
+// ── lib/icons/aether.tsx ──────────────────────────────────────────────
+export interface AetherManifest {
   file: string;
   folder: string;
   folderExpanded: string;
@@ -41,7 +45,7 @@ export interface FlowManifest {
 }
 
 // ── lib/ai.ts ─────────────────────────────────────────────────────────
-export type Brain = "claude" | "lmstudio" | "mercury";
+export type Brain = "claude" | "lm-studio" | "mercury";
 
 export interface AiSettings {
   brain: Brain;
@@ -50,9 +54,15 @@ export interface AiSettings {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   maxTokens: number;
+  reasoningEffort: string;
 }
 
 export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AiMessage {
   role: "user" | "assistant";
   content: string;
 }
@@ -76,6 +86,7 @@ export interface Settings {
   sidebarVisible: boolean;
   sidebarWidth: number;
   terminalVisible: boolean;
+  layoutMode: string;
 }
 
 // ── lib/fs.ts ─────────────────────────────────────────────────────────
@@ -117,6 +128,8 @@ export interface PtyCallbacks {
   onExit: (code: number) => void;
 }
 
+export type ReasoningEffort = "instant" | "low" | "medium" | "high";
+
 // ── lib/monaco/lineDiff.ts ────────────────────────────────────────────
 export interface DiffHunk {
   proposedStartLine: number;
@@ -150,7 +163,7 @@ export interface AiState {
 }
 
 // ── components/ActivityBar.tsx ────────────────────────────────────────
-export type ViewId = "explorer" | "search" | "scm" | "extensions";
+export type ViewId = "explorer" | "search" | "scm" | "extensions" | "settings";
 
 export interface ActivityBarItem {
   id: ViewId;
@@ -162,6 +175,8 @@ export interface ActivityBarProps {
   activeView: ViewId;
   onSelect: (id: ViewId) => void;
   onOpenSettings: () => void;
+  vertical?: boolean;
+  compact?: boolean;
 }
 
 // ── components/FileIcon.tsx ───────────────────────────────────────────
@@ -219,6 +234,8 @@ export interface InternalCtx extends TreeActions {
   setSelectedPaths: (paths: Set<string>) => void;
   lastClickedPath: string | null;
   setLastClickedPath: (p: string | null) => void;
+  clipboard: { paths: string[]; operation: "copy" | "cut" } | null;
+  setClipboard: (state: { paths: string[]; operation: "copy" | "cut" } | null) => void;
 }
 
 export interface FileTreeProps {
@@ -304,14 +321,13 @@ export interface CommitHistoryProps {
   rootPath: string;
 }
 
-// ── components/SettingsDialog.tsx ──────────────────────────────────────
-export interface SettingsDialogProps {
-  open: boolean;
-  onClose: () => void;
-  initialSection?: "appearance" | "layout" | "ai";
+// ── components/SettingsPanel.tsx ───────────────────────────────────────
+export interface SettingsPanelProps {
+  section: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
 }
 
-export type SettingsSection = "appearance" | "layout" | "ai";
+export type SettingsSection = "appearance" | "models" | "ai-tools" | "ai-config";
 
 // ── components/Breadcrumbs.tsx ─────────────────────────────────────────
 export interface BreadcrumbsProps {
@@ -350,6 +366,8 @@ export interface SidebarProps {
   onChangeWorkspace: () => void;
   onGoHome: () => void;
   onOpenDiff?: (filePath: string) => void;
+  settingsSection?: SettingsSection;
+  onSelectSettingsSection?: (section: SettingsSection) => void;
 }
 
 // ── components/StatusBar.tsx ──────────────────────────────────────────

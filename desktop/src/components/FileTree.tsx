@@ -1,6 +1,6 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { readDir, type DirEntry, revealInExplorer, openInTerminal, dirName } from "../lib/fs";
+import { readDir, type DirEntry, revealInExplorer, openInTerminal, dirName, baseName, joinPath, readFileText, writeFileText, copyEntry, deleteEntry as deleteEntryFs, createEntry, renameEntry as renameEntryFs } from "../lib/fs";
 import { FileTypeIcon, FolderTypeIcon } from "../lib/icons";
 import { Chevron, CheckGlyph, CloseGlyph } from "../icons";
 import type { InternalCtx, FileTreeProps, MenuState, MIProps } from "../types";
@@ -15,6 +15,17 @@ function useTree() {
 const INDENT = 12;
 const BASE = 10;
 
+type ClipboardState = {
+  paths: string[];
+  operation: "copy" | "cut";
+} | null;
+
+type HistoryOperation =
+  | { type: "create"; path: string; isDir: boolean; content?: string }
+  | { type: "delete"; path: string; isDir: boolean; content?: string }
+  | { type: "rename"; oldPath: string; newPath: string }
+  | { type: "move"; sourcePath: string; oldParent: string; newParent: string };
+
 /** True if `path` is `ancestor` itself or lives inside it. */
 function isPathWithinOrEqual(path: string, ancestor: string): boolean {
   return path === ancestor || path.startsWith(ancestor + "/") || path.startsWith(ancestor + "\\");
@@ -28,6 +39,9 @@ export default function FileTree({ rootPath, actions, expanded, onToggle, refres
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastClickedPath, setLastClickedPath] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<ClipboardState>(null);
+  const [undoStack, setUndoStack] = useState<HistoryOperation[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryOperation[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +53,153 @@ export default function FileTree({ rootPath, actions, expanded, onToggle, refres
       cancelled = true;
     };
   }, [rootPath, refreshNonce]);
+
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === "INPUT") return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      if (ctrl && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        if (undoStack.length === 0) return;
+
+        const op = undoStack[undoStack.length - 1];
+        setUndoStack(undoStack.slice(0, -1));
+        setRedoStack([...redoStack, op]);
+
+        try {
+          if (op.type === "create") {
+            await deleteEntryFs(op.path);
+          } else if (op.type === "delete") {
+            if (op.content !== undefined) {
+              await createEntry(op.path, op.isDir);
+              if (!op.isDir && op.content) {
+                await writeFileText(op.path, op.content);
+              }
+            }
+          } else if (op.type === "rename") {
+            await renameEntryFs(op.newPath, op.oldPath);
+          } else if (op.type === "move") {
+            const name = baseName(op.sourcePath);
+            const currentPath = joinPath(op.newParent, name);
+            const originalPath = joinPath(op.oldParent, name);
+            await renameEntryFs(currentPath, originalPath);
+          }
+        } catch (err) {
+          console.error("Undo failed:", err);
+        }
+        return;
+      }
+
+      if (ctrl && e.key === "y") {
+        e.preventDefault();
+        if (redoStack.length === 0) return;
+
+        const op = redoStack[redoStack.length - 1];
+        setRedoStack(redoStack.slice(0, -1));
+        setUndoStack([...undoStack, op]);
+
+        try {
+          if (op.type === "create") {
+            await createEntry(op.path, op.isDir);
+          } else if (op.type === "delete") {
+            await deleteEntryFs(op.path);
+          } else if (op.type === "rename") {
+            await renameEntryFs(op.oldPath, op.newPath);
+          } else if (op.type === "move") {
+            const name = baseName(op.sourcePath);
+            const originalPath = joinPath(op.oldParent, name);
+            const newPath = joinPath(op.newParent, name);
+            await renameEntryFs(originalPath, newPath);
+          }
+        } catch (err) {
+          console.error("Redo failed:", err);
+        }
+        return;
+      }
+
+      if (selectedPaths.size === 0 && !ctrl) return;
+
+      if (e.key === "Delete") {
+        e.preventDefault();
+        const firstPath = Array.from(selectedPaths)[0];
+        actions.onBeginDelete(firstPath, false);
+      } else if (e.key === "F2") {
+        e.preventDefault();
+        const firstPath = Array.from(selectedPaths)[0];
+        actions.onBeginRename(firstPath);
+      } else if (ctrl && e.key === "c") {
+        e.preventDefault();
+        setClipboard({ paths: Array.from(selectedPaths), operation: "copy" });
+      } else if (ctrl && e.key === "x") {
+        e.preventDefault();
+        setClipboard({ paths: Array.from(selectedPaths), operation: "cut" });
+      } else if (ctrl && e.key === "v") {
+        e.preventDefault();
+
+        try {
+          const clipboardItems = await navigator.clipboard.read();
+          let hasFiles = false;
+
+          for (const item of clipboardItems) {
+            if (item.types.includes("text/uri-list")) {
+              const blob = await item.getType("text/uri-list");
+              const text = await blob.text();
+              const uris = text.split("\n").filter(u => u.trim());
+
+              const targetDir = selectedPaths.size === 1 ? Array.from(selectedPaths)[0] : rootPath;
+
+              for (const uri of uris) {
+                let filePath = uri.trim();
+                if (filePath.startsWith("file:///")) {
+                  filePath = decodeURIComponent(filePath.substring(8));
+                } else if (filePath.startsWith("file://")) {
+                  filePath = decodeURIComponent(filePath.substring(7));
+                }
+
+                if (filePath) {
+                  const name = baseName(filePath);
+                  const destPath = joinPath(targetDir, name);
+                  try {
+                    await copyEntry(filePath, destPath);
+                    hasFiles = true;
+                  } catch (err) {
+                    console.error("Failed to copy file:", err);
+                  }
+                }
+              }
+
+              if (hasFiles) return;
+            }
+          }
+        } catch (err) {
+          console.log("No files in clipboard, trying internal clipboard");
+        }
+
+        if (clipboard) {
+          const targetDir = selectedPaths.size === 1 ? Array.from(selectedPaths)[0] : rootPath;
+          clipboard.paths.forEach(async (srcPath) => {
+            if (clipboard.operation === "cut") {
+              actions.onMoveEntry(srcPath, targetDir);
+            } else {
+              const name = baseName(srcPath);
+              const destPath = joinPath(targetDir, name);
+              try {
+                await copyEntry(srcPath, destPath);
+              } catch (err) {
+                console.error("Failed to copy:", err);
+              }
+            }
+          });
+          if (clipboard.operation === "cut") setClipboard(null);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedPaths, clipboard, rootPath, actions, undoStack, redoStack]);
 
   const ctxValue: InternalCtx = useMemo(
     () => ({
@@ -58,8 +219,10 @@ export default function FileTree({ rootPath, actions, expanded, onToggle, refres
       setSelectedPaths,
       lastClickedPath,
       setLastClickedPath,
+      clipboard,
+      setClipboard,
     }),
-    [actions, rootPath, expanded, onToggle, refreshNonce, onChangeWorkspace, onGoHome, draggingPath, dragOverPath, selectedPaths, lastClickedPath],
+    [actions, rootPath, expanded, onToggle, refreshNonce, onChangeWorkspace, onGoHome, draggingPath, dragOverPath, selectedPaths, lastClickedPath, clipboard],
   );
 
   return (
@@ -166,35 +329,30 @@ const TreeNode = memo(function TreeNode({ entry, depth }: { entry: DirEntry; dep
     };
   }, [entry.is_dir, entry.path, open, tree.refreshNonce]);
 
-  /** Single click — select (+ toggle folder expand). Double click — open file. */
   const handleClick = (e: React.MouseEvent) => {
     const ctrl = e.ctrlKey || e.metaKey;
     const shift = e.shiftKey;
 
-    // Folders always toggle expand on click
-    if (entry.is_dir) tree.onToggle(entry.path);
+    if (entry.is_dir) {
+      tree.onToggle(entry.path);
+    } else {
+      tree.onOpenFile(entry.path);
+    }
 
     if (ctrl) {
-      // Ctrl+click: toggle this entry in/out of selection
       const next = new Set(tree.selectedPaths);
       if (next.has(entry.path)) next.delete(entry.path);
       else next.add(entry.path);
       tree.setSelectedPaths(next);
       tree.setLastClickedPath(entry.path);
     } else if (shift && tree.lastClickedPath) {
-      // Shift+click: extend selection without replacing
       const next = new Set(tree.selectedPaths);
       next.add(entry.path);
       tree.setSelectedPaths(next);
     } else {
-      // Plain click: select only this one
       tree.setSelectedPaths(new Set([entry.path]));
       tree.setLastClickedPath(entry.path);
     }
-  };
-
-  const handleDoubleClick = () => {
-    if (!entry.is_dir) tree.onOpenFile(entry.path);
   };
 
   if (isDeleting) {
@@ -242,13 +400,33 @@ const TreeNode = memo(function TreeNode({ entry, depth }: { entry: DirEntry; dep
             if (!entry.is_dir || invalidDropTarget) return;
             e.preventDefault();
             e.stopPropagation();
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+              Array.from(files).forEach(async (file) => {
+                const destPath = joinPath(entry.path, file.name);
+                const reader = new FileReader();
+                reader.onload = async () => {
+                  const content = reader.result as string;
+                  try {
+                    await writeFileText(destPath, content);
+                  } catch (err) {
+                    console.error("Failed to write dropped file:", err);
+                  }
+                };
+                reader.readAsText(file);
+              });
+              tree.setDraggingPath(null);
+              tree.setDragOverPath(null);
+              return;
+            }
+
             const src = e.dataTransfer.getData("text/plain");
             if (src) tree.onMoveEntry(src, entry.path);
             tree.setDraggingPath(null);
             tree.setDragOverPath(null);
           }}
           onClick={handleClick}
-          onDoubleClick={handleDoubleClick}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation(); // prevent empty-space menu from also firing
@@ -532,9 +710,28 @@ function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }
             <MI label="Change workspace folder" onClick={() => run(tree.onChangeWorkspace)} />
             <MI label="Go to homepage" onClick={() => run(tree.onGoHome)} />
             <Sep />
-            <MI label="Find in Folder..." shortcut="Shift+Alt+F" onClick={() => {}} />
+            <MI label="Find in Folder..." shortcut="Shift+Alt+F" onClick={() => {}} disabled />
             <Sep />
-            <MI label="Paste" shortcut="Ctrl+V" onClick={() => {}} />
+            <MI
+              label="Paste"
+              shortcut="Ctrl+V"
+              disabled={!tree.clipboard}
+              onClick={() => run(() => {
+                if (!tree.clipboard) return;
+                tree.clipboard.paths.forEach((srcPath) => {
+                  if (tree.clipboard!.operation === "cut") {
+                    tree.onMoveEntry(srcPath, tree.rootPath);
+                  } else {
+                    const name = baseName(srcPath);
+                    const destPath = joinPath(tree.rootPath, name);
+                    readFileText(srcPath)
+                      .then((content) => writeFileText(destPath, content))
+                      .catch(() => {});
+                  }
+                });
+                if (tree.clipboard.operation === "cut") tree.setClipboard(null);
+              })}
+            />
           </>
         ) : entry.is_dir ? (
           /* ── Folder ───────────────────────────────────────────────────── */
@@ -552,9 +749,28 @@ function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }
             <MI label="Add Directory to Aether Chat" onClick={() => {}} disabled />
             <MI label="Add Directory to New Aether Chat" onClick={() => {}} disabled />
             <Sep />
-            <MI label="Find in Folder..." shortcut="Shift+Alt+F" onClick={() => {}} />
+            <MI label="Find in Folder..." shortcut="Shift+Alt+F" onClick={() => {}} disabled />
             <Sep />
-            <MI label="Paste" shortcut="Ctrl+V" onClick={() => {}} />
+            <MI
+              label="Paste"
+              shortcut="Ctrl+V"
+              disabled={!tree.clipboard}
+              onClick={() => run(() => {
+                if (!tree.clipboard) return;
+                tree.clipboard.paths.forEach((srcPath) => {
+                  if (tree.clipboard!.operation === "cut") {
+                    tree.onMoveEntry(srcPath, entry.path);
+                  } else {
+                    const name = baseName(srcPath);
+                    const destPath = joinPath(entry.path, name);
+                    readFileText(srcPath)
+                      .then((content) => writeFileText(destPath, content))
+                      .catch(() => {});
+                  }
+                });
+                if (tree.clipboard.operation === "cut") tree.setClipboard(null);
+              })}
+            />
             <MI label="Copy Path" shortcut="Ctrl+Shift+C" onClick={() => run(() => navigator.clipboard.writeText(entry.path))} />
             <MI label="Copy Relative Path" shortcut="Ctrl+M Ctrl+Shift+C" onClick={() => run(() => navigator.clipboard.writeText(relPath(entry.path)))} />
             <Sep />
@@ -565,16 +781,24 @@ function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }
           /* ── File ─────────────────────────────────────────────────────── */
           <>
             <MI label="Open to the Side" shortcut="Ctrl+↵" onClick={() => run(() => tree.onOpenFile(entry.path))} />
-            <MI label="Open in Browser" onClick={() => {}} />
-            <MI label="Open With..." onClick={() => {}} />
+            <MI label="Open in Browser" onClick={() => {}} disabled />
+            <MI label="Open With..." onClick={() => {}} disabled />
             <MI label="Reveal in File Explorer" shortcut="Shift+Alt+R" onClick={() => run(() => revealInExplorer(entry.path))} />
             <MI label="Open in Integrated Terminal" onClick={() => run(() => openInTerminal(dirName(entry.path)))} />
             <Sep />
             <MI label="Add File to Aether Chat" onClick={() => {}} disabled />
             <MI label="Add File to New Aether Chat" onClick={() => {}} disabled />
             <Sep />
-            <MI label="Cut" shortcut="Ctrl+X" onClick={() => {}} />
-            <MI label="Copy" shortcut="Ctrl+C" onClick={() => run(() => navigator.clipboard.writeText(entry.path))} />
+            <MI
+              label="Cut"
+              shortcut="Ctrl+X"
+              onClick={() => run(() => tree.setClipboard({ paths: [entry.path], operation: "cut" }))}
+            />
+            <MI
+              label="Copy"
+              shortcut="Ctrl+C"
+              onClick={() => run(() => tree.setClipboard({ paths: [entry.path], operation: "copy" }))}
+            />
             <Sep />
             <MI label="Copy Path" shortcut="Shift+Alt+C" onClick={() => run(() => navigator.clipboard.writeText(entry.path))} />
             <MI label="Copy Relative Path" shortcut="Ctrl+M Ctrl+Shift+C" onClick={() => run(() => navigator.clipboard.writeText(relPath(entry.path)))} />

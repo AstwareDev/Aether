@@ -7,6 +7,7 @@ use std::process::Command;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+use base64::Engine;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
@@ -17,7 +18,6 @@ fn create_command(program: &str) -> Command {
     cmd
 }
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -30,8 +30,6 @@ struct DirEntryInfo {
     is_dir: bool,
 }
 
-/// List the immediate children of `path`, sorted directories-first then
-/// alphabetically (case-insensitive). Used for lazy-loading the file tree.
 #[tauri::command]
 async fn read_dir(path: String) -> Result<Vec<DirEntryInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || read_dir_blocking(path))
@@ -74,8 +72,6 @@ fn read_dir_blocking(path: String) -> Result<Vec<DirEntryInfo>, String> {
     Ok(entries)
 }
 
-/// Read a file as UTF-8 text. Rejects files larger than 5 MiB and files that
-/// aren't valid UTF-8 (likely binary) so the editor never chokes on them.
 #[tauri::command]
 fn read_file_text(path: String) -> Result<String, String> {
     const MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -92,16 +88,9 @@ fn read_file_text(path: String) -> Result<String, String> {
 #[derive(Serialize)]
 struct FileTextResult {
     path: String,
-    /// `None` when the file was too large, not valid UTF-8, or unreadable —
-    /// callers treat this as "skip", not as a fatal error for the whole batch.
     text: Option<String>,
 }
 
-/// Batch-read many files as UTF-8 text in one IPC round-trip. Used to prime
-/// the workspace-wide IntelliSense index without one `read_file_text` call
-/// per file. Per-file guards mirror `read_file_text`, but a single bad file
-/// (too large / binary / deleted mid-scan) just yields `text: None` for that
-/// entry rather than failing the whole batch.
 #[tauri::command]
 async fn read_files_text(paths: Vec<String>) -> Result<Vec<FileTextResult>, String> {
     tauri::async_runtime::spawn_blocking(move || read_files_text_blocking(paths))
@@ -110,7 +99,7 @@ async fn read_files_text(paths: Vec<String>) -> Result<Vec<FileTextResult>, Stri
 }
 
 fn read_files_text_blocking(paths: Vec<String>) -> Vec<FileTextResult> {
-    const MAX_BYTES: u64 = 1024 * 1024; // smaller than read_file_text's 5 MiB — these are background index entries, not the actively-edited file.
+    const MAX_BYTES: u64 = 1024 * 1024;
 
     paths
         .into_iter()
@@ -125,8 +114,6 @@ fn read_files_text_blocking(paths: Vec<String>) -> Vec<FileTextResult> {
         .collect()
 }
 
-/// Write UTF-8 text back to a file on disk. Written atomically (temp file +
-/// rename) so a crash mid-write can't leave a truncated file.
 #[tauri::command]
 fn write_file_text(path: String, contents: String) -> Result<(), String> {
     let target = Path::new(&path);
@@ -145,15 +132,220 @@ fn write_file_text(path: String, contents: String) -> Result<(), String> {
 
 #[derive(Serialize)]
 struct FileEntry {
-    /// Absolute path on disk.
     path: String,
-    /// Path relative to the workspace root, using `/` separators (for display + fuzzy search).
     rel: String,
 }
 
-/// Recursively index every file under `root` for the quick-open palette.
-/// Honors `.gitignore` / `.ignore`, always skips `.git`, and caps the result
-/// so pathological trees can't hang the UI.
+#[derive(Serialize)]
+struct SearchMatch {
+    path: String,
+    rel: String,
+    line: usize,
+    column: usize,
+    text: String,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SearchResult {
+    matches: Vec<SearchMatch>,
+    file_count: usize,
+    match_count: usize,
+    truncated: bool,
+}
+
+#[tauri::command]
+async fn search_files(
+    root: String,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    use_regex: bool,
+    include_pattern: Option<String>,
+    exclude_pattern: Option<String>,
+    context_lines: usize,
+) -> Result<SearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        search_files_blocking(
+            root,
+            query,
+            case_sensitive,
+            whole_word,
+            use_regex,
+            include_pattern,
+            exclude_pattern,
+            context_lines,
+        )
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+fn search_files_blocking(
+    root: String,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    use_regex: bool,
+    include_pattern: Option<String>,
+    exclude_pattern: Option<String>,
+    context_lines: usize,
+) -> Result<SearchResult, String> {
+    use regex::RegexBuilder;
+    use std::collections::HashSet;
+    use std::io::{BufRead, BufReader};
+
+    const MAX_MATCHES: usize = 10_000;
+    const MAX_FILES: usize = 1_000;
+
+    if query.is_empty() {
+        return Ok(SearchResult {
+            matches: Vec::new(),
+            file_count: 0,
+            match_count: 0,
+            truncated: false,
+        });
+    }
+
+    let pattern = if use_regex {
+        query.clone()
+    } else {
+        let escaped = regex::escape(&query);
+        if whole_word {
+            format!(r"\b{}\b", escaped)
+        } else {
+            escaped
+        }
+    };
+
+    let regex = RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("invalid regex: {e}"))?;
+
+    let include_glob = include_pattern.as_ref().and_then(|p| {
+        if !p.is_empty() {
+            globset::Glob::new(p).ok()
+        } else {
+            None
+        }
+    });
+
+    let exclude_glob = exclude_pattern.as_ref().and_then(|p| {
+        if !p.is_empty() {
+            globset::Glob::new(p).ok()
+        } else {
+            None
+        }
+    });
+
+    let root_path = Path::new(&root);
+    let mut matches = Vec::new();
+    let mut files_with_matches = HashSet::new();
+    let mut truncated = false;
+
+    let walker = WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .git_global(false)
+        .parents(true)
+        .filter_entry(|entry| entry.file_name() != ".git")
+        .build();
+
+    for result in walker {
+        if matches.len() >= MAX_MATCHES || files_with_matches.len() >= MAX_FILES {
+            truncated = true;
+            break;
+        }
+
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(root_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        if let Some(ref glob) = include_glob {
+            if !glob.compile_matcher().is_match(&rel) {
+                continue;
+            }
+        }
+
+        if let Some(ref glob) = exclude_glob {
+            if glob.compile_matcher().is_match(&rel) {
+                continue;
+            }
+        }
+
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+
+        let reader = BufReader::new(file);
+        let mut lines: Vec<String> = Vec::new();
+
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            lines.push(line);
+        }
+
+        let mut file_matches = Vec::new();
+        for (line_idx, line_text) in lines.iter().enumerate() {
+            if let Some(mat) = regex.find(line_text) {
+                let before = if line_idx >= context_lines {
+                    lines[line_idx - context_lines..line_idx].to_vec()
+                } else {
+                    lines[0..line_idx].to_vec()
+                };
+
+                let after_end = std::cmp::min(line_idx + context_lines + 1, lines.len());
+                let after = lines[line_idx + 1..after_end].to_vec();
+
+                file_matches.push(SearchMatch {
+                    path: path.to_string_lossy().to_string(),
+                    rel: rel.clone(),
+                    line: line_idx + 1,
+                    column: mat.start() + 1,
+                    text: line_text.clone(),
+                    before,
+                    after,
+                });
+
+                if matches.len() + file_matches.len() >= MAX_MATCHES {
+                    break;
+                }
+            }
+        }
+
+        if !file_matches.is_empty() {
+            files_with_matches.insert(path.to_string_lossy().to_string());
+            matches.extend(file_matches);
+        }
+    }
+
+    Ok(SearchResult {
+        match_count: matches.len(),
+        file_count: files_with_matches.len(),
+        matches,
+        truncated,
+    })
+}
+
 #[tauri::command]
 async fn list_files(root: String) -> Result<Vec<FileEntry>, String> {
     tauri::async_runtime::spawn_blocking(move || list_files_blocking(root))
@@ -168,7 +360,7 @@ fn list_files_blocking(root: String) -> Result<Vec<FileEntry>, String> {
     let mut files: Vec<FileEntry> = Vec::new();
 
     let walker = WalkBuilder::new(&root)
-        .hidden(false) // dotfiles are shown, like VS Code's quick-open
+        .hidden(false)
         .git_ignore(true)
         .git_exclude(true)
         .git_global(false)
@@ -202,7 +394,6 @@ fn list_files_blocking(root: String) -> Result<Vec<FileEntry>, String> {
     Ok(files)
 }
 
-/// Create a new empty file or directory. Fails if the target already exists.
 #[tauri::command]
 fn create_entry(path: String, is_dir: bool) -> Result<(), String> {
     if Path::new(&path).exists() {
@@ -218,9 +409,6 @@ fn create_entry(path: String, is_dir: bool) -> Result<(), String> {
     }
 }
 
-/// Rename / move a file or directory. Rejects when a *different* entry already
-/// occupies the destination, but allows case-only renames on case-insensitive
-/// filesystems (Windows/macOS) where `to` resolves to `from` itself.
 #[tauri::command]
 fn rename_entry(from: String, to: String) -> Result<(), String> {
     if Path::new(&to).exists() {
@@ -235,7 +423,6 @@ fn rename_entry(from: String, to: String) -> Result<(), String> {
     std::fs::rename(&from, &to).map_err(|e| e.to_string())
 }
 
-/// Permanently delete a file or directory (recursively).
 #[tauri::command]
 fn delete_entry(path: String) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -246,13 +433,53 @@ fn delete_entry(path: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn copy_entry(from: String, to: String) -> Result<(), String> {
+    let from_path = Path::new(&from);
+    let to_path = Path::new(&to);
+
+    if to_path.exists() {
+        return Err("An item with that name already exists.".to_string());
+    }
+
+    let metadata = std::fs::symlink_metadata(from_path).map_err(|e| e.to_string())?;
+
+    if metadata.is_dir() {
+        copy_dir_recursive(from_path, to_path)
+    } else {
+        if let Some(parent) = to_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(from_path, to_path).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+
+    for entry in std::fs::read_dir(from).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let from_path = entry.path();
+        let to_path = to.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_recursive(&from_path, &to_path)?;
+        } else {
+            std::fs::copy(&from_path, &to_path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct GitFileStatus {
     path: String,
-    status: String, // "M", "A", "D", "R", "?", etc.
+    status: String,
 }
 
-/// Run `git status --porcelain` in `root` and return per-file status entries.
 #[tauri::command]
 async fn git_status(root: String) -> Result<Vec<GitFileStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -274,7 +501,6 @@ async fn git_status(root: String) -> Result<Vec<GitFileStatus>, String> {
             }
             let xy = &line[..2];
             let path = line[3..].trim().to_string();
-            // Prefer the index status; fall back to worktree status.
             let x = xy.chars().next().unwrap_or(' ');
             let y = xy.chars().nth(1).unwrap_or(' ');
             let status = if x != ' ' && x != '?' { x } else { y };
@@ -289,12 +515,9 @@ async fn git_status(root: String) -> Result<Vec<GitFileStatus>, String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Run `git diff HEAD -- <file>` (or `git diff -- <file>` for untracked) to get
-/// a unified diff for the given file relative to the repo root.
 #[tauri::command]
 async fn git_diff(root: String, file_path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        // Try staged+unstaged diff first (HEAD vs working tree).
         let output = create_command("git")
             .args(["diff", "HEAD", "--", &file_path])
             .current_dir(&root)
@@ -305,7 +528,6 @@ async fn git_diff(root: String, file_path: String) -> Result<String, String> {
             return Ok(String::from_utf8_lossy(&output.stdout).to_string());
         }
 
-        // Untracked file: diff against /dev/null equivalent.
         let output2 = create_command("git")
             .args(["diff", "--no-index", "--", "/dev/null", &file_path])
             .current_dir(&root)
@@ -318,7 +540,6 @@ async fn git_diff(root: String, file_path: String) -> Result<String, String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Stage all changes (`git add -A`) in the given repo root.
 #[tauri::command]
 async fn git_stage_all(root: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -338,7 +559,6 @@ async fn git_stage_all(root: String) -> Result<(), String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Create a git commit with the given message.
 #[tauri::command]
 async fn git_commit(root: String, message: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -358,7 +578,6 @@ async fn git_commit(root: String, message: String) -> Result<(), String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Get the current git branch name.
 #[tauri::command]
 async fn git_branch(root: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -378,8 +597,25 @@ async fn git_branch(root: String) -> Result<String, String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Run `git show HEAD:<file>` to get the committed version of a file.
-/// Returns empty string if the file doesn't exist in HEAD (new/untracked).
+#[tauri::command]
+async fn git_checkout_file(root: String, file_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = create_command("git")
+            .args(["checkout", "HEAD", "--", &file_path])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn git_show(root: String, file_path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -392,7 +628,6 @@ async fn git_show(root: String, file_path: String) -> Result<String, String> {
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            // New/untracked file — no committed version exists.
             Ok(String::new())
         }
     })
@@ -410,7 +645,6 @@ struct GitCommit {
     refs: String,
 }
 
-/// Get structured commit log (HEAD..HEAD~50).
 #[tauri::command]
 async fn git_log(root: String) -> Result<Vec<GitCommit>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -453,7 +687,6 @@ async fn git_log(root: String) -> Result<Vec<GitCommit>, String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-/// Get raw git graph text for visual rendering.
 #[tauri::command]
 async fn git_log_graph(root: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -493,8 +726,6 @@ fn clone_repository(url: String, dest: String) -> Result<(), String> {
     }
 }
 
-/// Open the OS file manager at the given path (selects the item if it is a
-/// file; opens the directory if it is a folder).
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -513,7 +744,6 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        // Best-effort: xdg-open the parent directory
         let dir = Path::new(&path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
@@ -526,7 +756,37 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Open a new OS terminal window in `dir`.
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::engine::general_purpose::STANDARD;
+    const MAX_BYTES: u64 = 20 * 1024 * 1024;
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("failed to stat file: {e}"))?;
+    if metadata.len() > MAX_BYTES {
+        return Err("File is too large (over 20 MB).".to_string());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("failed to read file: {e}"))?;
+    Ok(STANDARD.encode(&bytes))
+}
+
+#[tauri::command]
+fn write_file_base64(path: String, contents: String) -> Result<(), String> {
+    use base64::engine::general_purpose::STANDARD;
+    let bytes = STANDARD
+        .decode(&contents)
+        .map_err(|e| format!("invalid base64: {e}"))?;
+    let target = std::path::Path::new(&path);
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| "invalid file path".to_string())?
+        .to_string_lossy();
+    let tmp = target.with_file_name(format!(".{file_name}.aether-tmp"));
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("failed to write file: {e}"))?;
+    std::fs::rename(&tmp, target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("failed to write file: {e}")
+    })
+}
+
 #[tauri::command]
 fn open_in_terminal(dir: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -545,7 +805,6 @@ fn open_in_terminal(dir: String) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        // Try common terminals in order
         let _ = Command::new("x-terminal-emulator")
             .current_dir(&dir)
             .spawn()
@@ -568,10 +827,14 @@ pub fn run() {
             read_file_text,
             read_files_text,
             write_file_text,
+            read_file_base64,
+            write_file_base64,
             list_files,
+            search_files,
             create_entry,
             rename_entry,
             delete_entry,
+            copy_entry,
             ai::ai_complete,
             ai::ai_list_models,
             terminal::pty_spawn,
@@ -588,6 +851,7 @@ pub fn run() {
             git_stage_all,
             git_commit,
             git_branch,
+            git_checkout_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

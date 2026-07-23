@@ -34,6 +34,7 @@ function colorFor(name: string): string {
     case "md":
     case "markdown":
       return "#94a3b8";
+    case "drawio":
     case "svg":
     case "png":
     case "jpg":
@@ -165,7 +166,7 @@ export function QuestionSvg() {
 // Settings section icon (SettingsDialog.tsx)
 // ─────────────────────────────────────────────────────────────────────
 
-type SettingsSection = "appearance" | "layout" | "ai";
+import type { SettingsSection } from "./types";
 
 export function SectionIcon({ section }: { section: SettingsSection }) {
   switch (section) {
@@ -176,14 +177,22 @@ export function SectionIcon({ section }: { section: SettingsSection }) {
           <path d="M2 8h12M8 2a9.5 9.5 0 010 12 9.5 9.5 0 010-12z" stroke="currentColor" strokeWidth="1.3" />
         </svg>
       );
-    case "layout":
+    case "models":
       return (
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M6 2v12M2 8h12" stroke="currentColor" strokeWidth="1.3" />
+          <rect x="3" y="2" width="10" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="8" cy="6" r="1.5" stroke="currentColor" strokeWidth="1.1" />
+          <path d="M6 10.5c0-.8.9-1.5 2-1.5s2 .7 2 1.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
         </svg>
       );
-    case "ai":
+    case "ai-tools":
+      return (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M3 10l2-2M3 6l2 2M13 10l-2-2M13 6l-2 2M5 8h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" />
+        </svg>
+      );
+    case "ai-config":
       return (
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
           <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5L8 1z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />

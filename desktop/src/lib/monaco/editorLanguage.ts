@@ -1,12 +1,5 @@
 import { baseName, extensionOf } from "../fs";
 
-/**
- * Pick a Monaco language id from a file path, or "plaintext" for none.
- *
- * Known gaps: TOML and Vue/Svelte single-file components aren't in Monaco's
- * bundled basic-languages set (no third-party tokenizer added for them here),
- * so those extensions fall back to plaintext.
- */
 export function languageForPath(path: string): string {
   if (baseName(path) === "Dockerfile") return "dockerfile";
 
@@ -44,6 +37,7 @@ export function languageForPath(path: string): string {
     case "yaml":
     case "yml":
       return "yaml";
+    case "drawio":
     case "xml":
       return "xml";
     case "sh":

@@ -1,9 +1,3 @@
-//! LLM bridge for the inline AI editor (Ctrl+K).
-//!
-//! All network calls happen here in Rust rather than the webview so that the
-//! API key never crosses a browser fetch/CORS boundary and stays on-device.
-//! Tokens are streamed back to the frontend over a `tauri::ipc::Channel`.
-
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -17,9 +11,7 @@ pub struct ChatMessage {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiRequest {
-    /// `"anthropic"` (Claude) or `"openai"` (LM Studio / OpenAI-compatible).
     pub provider: String,
-    /// Base URL for OpenAI-compatible providers (e.g. `http://localhost:1234`).
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model: String,
@@ -27,16 +19,18 @@ pub struct AiRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    #[serde(default = "default_reasoning_effort")]
+    pub reasoning_effort: String,
 }
 
 fn default_max_tokens() -> u32 {
     4096
 }
 
-/// Streamed back to the frontend. `done` fires once at the end of a successful
-/// stream; `error` carries a human-readable message on failure. `replace`
-/// carries the FULL message text so far (not an increment) — used by diffusion
-/// models (Mercury), whose chunks are progressively denoised whole messages.
+fn default_reasoning_effort() -> String {
+    "medium".to_string()
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AiEvent {
@@ -46,8 +40,6 @@ pub enum AiEvent {
     Error { message: String },
 }
 
-/// Stream a completion. Deltas arrive on `on_event`; the returned `Result`
-/// mirrors success/failure so the JS `invoke` promise resolves or rejects.
 #[tauri::command]
 pub async fn ai_complete(request: AiRequest, on_event: Channel<AiEvent>) -> Result<(), String> {
     let result = match request.provider.as_str() {
@@ -71,8 +63,6 @@ pub async fn ai_complete(request: AiRequest, on_event: Channel<AiEvent>) -> Resu
     result
 }
 
-/// Parse an SSE byte stream line by line, handing each `data:` payload to `f`.
-/// `f` returns `Ok(true)` to stop early (e.g. on `[DONE]`).
 async fn parse_sse<F>(resp: reqwest::Response, mut f: F) -> Result<(), String>
 where
     F: FnMut(&str) -> Result<bool, String>,
@@ -172,7 +162,6 @@ async fn stream_openai(req: &AiRequest, on_event: &Channel<AiEvent>) -> Result<(
         .trim_end_matches('/');
     let url = format!("{base}/v1/chat/completions");
 
-    // OpenAI-compatible servers take the system prompt as the first message.
     let mut messages = vec![serde_json::json!({ "role": "system", "content": req.system })];
     for m in &req.messages {
         messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
@@ -232,7 +221,6 @@ async fn stream_mercury(req: &AiRequest, on_event: &Channel<AiEvent>) -> Result<
         .trim_end_matches('/');
     let url = format!("{base}/v1/playground");
 
-    // Mercury takes the system prompt as the first message (OpenAI-compatible).
     let mut messages = vec![serde_json::json!({ "role": "system", "content": req.system })];
     for m in &req.messages {
         messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
@@ -244,7 +232,7 @@ async fn stream_mercury(req: &AiRequest, on_event: &Channel<AiEvent>) -> Result<
         "max_tokens": req.max_tokens,
         "stream": true,
         "diffusing": true,
-        "reasoning_effort": "instant",
+        "reasoning_effort": req.reasoning_effort,
     });
 
     let mut builder = reqwest::Client::new()
@@ -266,9 +254,6 @@ async fn stream_mercury(req: &AiRequest, on_event: &Channel<AiEvent>) -> Result<
         return Err(format!("Mercury API error ({status}): {}", brief(&text)));
     }
 
-    // Mercury streams diffusion chunks — each `content` is the full
-    // progressively-denoised message (garbled → clean), so we emit `Replace`
-    // instead of `Delta`.
     parse_sse(resp, |data| {
         if data == "[DONE]" {
             return Ok(true);
@@ -288,7 +273,6 @@ async fn stream_mercury(req: &AiRequest, on_event: &Channel<AiEvent>) -> Result<
     .await
 }
 
-/// List models from an OpenAI-compatible server (`GET /v1/models`).
 #[tauri::command]
 pub async fn ai_list_models(base_url: String) -> Result<Vec<String>, String> {
     let base = base_url.trim_end_matches('/');
@@ -322,7 +306,6 @@ pub async fn ai_list_models(base_url: String) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
-/// Trim an error body to something short enough for a toast.
 fn brief(text: &str) -> String {
     let t = text.trim();
     if t.len() > 300 {

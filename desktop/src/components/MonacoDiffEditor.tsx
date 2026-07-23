@@ -29,12 +29,12 @@ export default function MonacoDiffEditor({ original, modified, filePath }: Monac
       originalEditable: false,
       enableSplitViewResizing: false,
       renderMarginRevertIcon: false,
-      original: { lineNumbers: "off" },
       hideUnchangedRegions: {
         enabled: true,
         minimumLineCount: 5,
       },
     });
+    editor.getOriginalEditor().updateOptions({ lineNumbers: "off" });
     editorRef.current = editor;
 
     editor.setModel({ original: originalModel, modified: modifiedModel });

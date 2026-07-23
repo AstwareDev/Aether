@@ -6,6 +6,7 @@ import {
   createEntry,
   deleteEntry,
   dirName,
+  extensionOf,
   joinPath,
   listFiles,
   readFileText,
@@ -17,15 +18,17 @@ import { folderName } from "../lib/recentFolders";
 import { languageLabelForPath } from "../lib/languageLabel";
 import { getIconTheme, iconThemes } from "../lib/icons";
 import { setSetting, useSetting } from "../lib/settings";
-import type { Command, TreeActions, ViewId, OpenTab, CursorPos, PaletteMode, WorkspaceProps, FileBuffer } from "../types";
+import type { Command, TreeActions, ViewId, OpenTab, CursorPos, PaletteMode, WorkspaceProps, FileBuffer, SettingsSection } from "../types";
+import { SETTINGS_URI } from "../types";
 import Sidebar from "./Sidebar";
+import SettingsPanel from "./SettingsDialog";
 import TerminalPanel from "./TerminalPanel";
 import EditorTabs from "./EditorTabs";
 import MonacoDiffEditor from "./MonacoDiffEditor";
 import Breadcrumbs from "./Breadcrumbs";
 import StatusBar from "./StatusBar";
 import CommandPalette from "./CommandPalette";
-import SettingsDialog from "./SettingsDialog";
+
 import {
   NewFileIcon,
   NewFolderIcon,
@@ -46,6 +49,9 @@ import { CloseGlyph } from "../icons";
 // Monaco + language grammars are the heaviest dependency; only load them
 // once a file is actually opened.
 const CodeEditor = lazy(() => import("./CodeEditor"));
+const ImageViewer = lazy(() => import("./ImageViewer"));
+const DrawioEditor = lazy(() => import("./DrawioEditor"));
+const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
 
 function relativeTo(root: string, path: string): string {
   if (!path.startsWith(root)) return baseName(path);
@@ -64,6 +70,25 @@ function isDiffPath(p: string): boolean {
 
 function realPathFromDiff(p: string): string {
   return p.slice(DIFF_PREFIX.length);
+}
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
+
+function isDrawioPath(p: string): boolean {
+  if (isDiffPath(p)) return false;
+  const name = baseName(p).toLowerCase();
+  return extensionOf(p) === "drawio" || name.endsWith(".drawio.svg") || name.endsWith(".drawio.png");
+}
+
+function isImagePath(p: string): boolean {
+  if (isDiffPath(p) || isDrawioPath(p)) return false;
+  return IMAGE_EXTS.has(extensionOf(p));
+}
+
+function isMarkdownPath(p: string): boolean {
+  if (isDiffPath(p)) return false;
+  const ext = extensionOf(p);
+  return ext === "md" || ext === "markdown";
 }
 
 /**
@@ -91,6 +116,7 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
   buffersRef.current = buffers;
   const [diffBuffers, setDiffBuffers] = useState<Record<string, { original: string; modified: string }>>({});
   const [cursor, setCursor] = useState<CursorPos | null>(null);
+  const [markdownPreviewMode, setMarkdownPreviewMode] = useState<Record<string, "preview" | "markdown">>({});
 
   const [activeView, setActiveView] = useState<ViewId>("explorer");
   const sidebarVisible = useSetting("sidebarVisible");
@@ -114,18 +140,33 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [deletingPath, setDeletingPath] = useState<{ path: string; isDir: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"appearance" | "layout" | "ai">("appearance");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+
+  // Opens the settings tab, optionally switching to a specific section.
+  const openSettingsTab = useCallback((section?: SettingsSection) => {
+    if (section) setSettingsSection(section);
+    setOpenPaths((prev) => (prev.includes(SETTINGS_URI) ? prev : [...prev, SETTINGS_URI]));
+    setActivePath(SETTINGS_URI);
+    setActiveView("settings");
+    setBuffers((prev) => {
+      if (prev[SETTINGS_URI]) return prev;
+      return { ...prev, [SETTINGS_URI]: { value: "", saved: "" } };
+    });
+    setSetting("sidebarVisible", true);
+  }, []);
+
+  const handleSettingsSectionChange = useCallback((section: SettingsSection) => {
+    setSettingsSection(section);
+    setOpenPaths((prev) => (prev.includes(SETTINGS_URI) ? prev : [...prev, SETTINGS_URI]));
+    setActivePath(SETTINGS_URI);
+  }, []);
 
   // The inline AI editor (Ctrl+K) asks to open settings when it needs setup.
   useEffect(() => {
-    const open = () => {
-      setSettingsSection("ai");
-      setSettingsOpen(true);
-    };
+    const open = () => openSettingsTab("ai-config");
     window.addEventListener("aether:open-ai-settings", open);
     return () => window.removeEventListener("aether:open-ai-settings", open);
-  }, []);
+  }, [openSettingsTab]);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -163,7 +204,15 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     async (filePath: string) => {
       setActivePath(filePath);
       setOpenPaths((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]));
-      // Re-read if not loaded yet, or if the previous attempt errored (retry).
+      // Skip text read for images and drawio — they handle their own file reading.
+      if (isImagePath(filePath) || isDrawioPath(filePath)) {
+        setBuffers((prev) => ({ ...prev, [filePath]: { value: "", saved: "" } }));
+        return;
+      }
+      // Initialize markdown files in preview mode by default
+      if (isMarkdownPath(filePath) && !markdownPreviewMode[filePath]) {
+        setMarkdownPreviewMode((prev) => ({ ...prev, [filePath]: "preview" }));
+      }
       const current = buffersRef.current[filePath];
       if (current && !current.error) return;
       try {
@@ -192,6 +241,11 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
       return next;
     });
     setDiffBuffers((prev) => {
+      const next = { ...prev };
+      delete next[filePath];
+      return next;
+    });
+    setMarkdownPreviewMode((prev) => {
       const next = { ...prev };
       delete next[filePath];
       return next;
@@ -471,6 +525,10 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
 
   const selectView = useCallback(
     (v: ViewId) => {
+      if (v === "settings") {
+        openSettingsTab();
+        return;
+      }
       if (v === activeView && sidebarVisible) {
         setSetting("sidebarVisible", false);
         return;
@@ -478,13 +536,9 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
       setActiveView(v);
       if (!sidebarVisible) setSetting("sidebarVisible", true);
     },
-    [activeView, sidebarVisible],
+    [activeView, sidebarVisible, openSettingsTab],
   );
 
-  const openSettingsFromActivityBar = useCallback(() => {
-    setSettingsSection("appearance");
-    setSettingsOpen(true);
-  }, []);
   const requestNewFile = useCallback(() => beginCreate(path, false), [beginCreate, path]);
   const requestNewFolder = useCallback(() => beginCreate(path, true), [beginCreate, path]);
   const openFilesPalette = useCallback(() => openPalette("files"), [openPalette]);
@@ -511,9 +565,10 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
       { id: "view.search", title: "Show Search", category: "View", icon: SearchIcon, run: () => selectView("search") },
       { id: "view.scm", title: "Show Source Control", category: "View", icon: ScmIcon, run: () => selectView("scm") },
       { id: "view.extensions", title: "Show Extensions", category: "View", icon: ExtensionsIcon, run: () => selectView("extensions") },
+      { id: "view.settings", title: "Show Settings", category: "View", icon: SettingsIcon, run: () => openSettingsTab() },
       { id: "explorer.refresh", title: "Refresh Explorer", category: "View", icon: RefreshIcon, run: refreshTree },
       { id: "explorer.collapse", title: "Collapse Folders in Explorer", category: "View", icon: CollapseAllIcon, run: collapseAll },
-      { id: "ai.settings", title: "AI: Settings", category: "AI", icon: SettingsIcon, keywords: "claude lm studio model api key ctrl k", run: () => { setSettingsSection("ai"); setSettingsOpen(true); } },
+      { id: "ai.settings", title: "AI: Settings", category: "AI", icon: SettingsIcon, keywords: "claude lm studio model api key ctrl k", run: () => openSettingsTab("ai-config") },
     ];
     for (const t of iconThemes) {
       list.push({
@@ -527,13 +582,13 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
       });
     }
     return list;
-  }, [path, activePath, openPaths.length, saveFile, saveAll, closeTab, onClose, openPalette, toggleSidebar, toggleTerminal, selectView, refreshTree, collapseAll, iconTheme, beginCreate]);
+  }, [path, activePath, openPaths.length, saveFile, saveAll, closeTab, onClose, openPalette, toggleSidebar, toggleTerminal, selectView, refreshTree, collapseAll, iconTheme, beginCreate, openSettingsTab]);
 
   // ---- global keybindings ------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The palette, AI settings, and any inline tree edit own the keyboard while active.
-      if (palette.open || creating || renamingPath || deletingPath || settingsOpen) return;
+      if (palette.open || creating || renamingPath || deletingPath) return;
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
@@ -559,7 +614,7 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activePath, openPalette, saveFile, toggleSidebar, toggleTerminal, closeTab, palette.open, creating, renamingPath, deletingPath, settingsOpen]);
+  }, [activePath, openPalette, saveFile, toggleSidebar, toggleTerminal, closeTab, palette.open, creating, renamingPath, deletingPath]);
 
   const prevTabsRef = useRef<OpenTab[]>([]);
   const tabs: OpenTab[] = useMemo(() => {
@@ -574,9 +629,10 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     prevTabsRef.current = next;
     return next;
   }, [openPaths, buffers]);
-  const activeBuffer = activePath ? buffers[activePath] : undefined;
+  const isSettingsTab = activePath === SETTINGS_URI;
+  const activeBuffer = activePath && !isSettingsTab ? buffers[activePath] : undefined;
   const activeDiffData = activePath && isDiffPath(activePath) ? diffBuffers[activePath] : undefined;
-  const activeRel = activePath && !isDiffPath(activePath) ? relativeTo(path, activePath) : null;
+  const activeRel = activePath && !isDiffPath(activePath) && !isSettingsTab ? relativeTo(path, activePath) : null;
 
   return (
     <div className="flex h-full flex-col bg-canvas text-zinc-200">
@@ -598,10 +654,12 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
               onCollapseAll={collapseAll}
               onOpenPalette={openFilesPalette}
               onSelectView={selectView}
-              onOpenSettings={openSettingsFromActivityBar}
+              onOpenSettings={openSettingsTab}
               onChangeWorkspace={handleChangeWorkspace}
               onGoHome={onClose}
               onOpenDiff={handleOpenDiff}
+              settingsSection={settingsSection}
+              onSelectSettingsSection={handleSettingsSectionChange}
             />
             <div onMouseDown={onSidebarDragStart} className="w-1 shrink-0 cursor-col-resize hover:bg-white/[0.08]" />
           </>
@@ -617,10 +675,42 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
               onReorder={(newTabs) => setOpenPaths(newTabs.map((t) => t.path))}
             />
           )}
-          {activePath && !isDiffPath(activePath) && !activeBuffer?.error && <Breadcrumbs relPath={activeRel} />}
+          {activePath && !isSettingsTab && !isDiffPath(activePath) && !isImagePath(activePath) && !isDrawioPath(activePath) && !activeBuffer?.error && (
+            <div className="flex items-center justify-between border-b border-white/[0.05] px-4">
+              <Breadcrumbs relPath={activeRel} />
+              {isMarkdownPath(activePath) && (
+                <div className="flex items-center gap-1 rounded-md bg-white/[0.03] p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setMarkdownPreviewMode((prev) => ({ ...prev, [activePath]: "preview" }))}
+                    className={`rounded px-3 py-1 text-xs transition-colors ${
+                      markdownPreviewMode[activePath] === "preview"
+                        ? "bg-white/[0.08] text-zinc-200"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMarkdownPreviewMode((prev) => ({ ...prev, [activePath]: "markdown" }))}
+                    className={`rounded px-3 py-1 text-xs transition-colors ${
+                      markdownPreviewMode[activePath] === "markdown"
+                        ? "bg-white/[0.08] text-zinc-200"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    Markdown
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="min-h-0 flex-1">
-            {activePath && isDiffPath(activePath) ? (
+            {isSettingsTab ? (
+              <SettingsPanel section={settingsSection} onSectionChange={handleSettingsSectionChange} />
+            ) : activePath && isDiffPath(activePath) ? (
               activeDiffData ? (
                 <MonacoDiffEditor
                   original={activeDiffData.original}
@@ -632,12 +722,24 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
                   Loading diff…
                 </div>
               )
+            ) : activePath && isImagePath(activePath) ? (
+              <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
+                <ImageViewer path={activePath} />
+              </Suspense>
+            ) : activePath && isDrawioPath(activePath) ? (
+              <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
+                <DrawioEditor path={activePath} />
+              </Suspense>
             ) : activePath && activeBuffer ? (
               activeBuffer.error ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <p className="text-sm text-zinc-400">Can’t open {baseName(activePath)}</p>
                   <p className="max-w-md text-xs text-zinc-400">{activeBuffer.error}</p>
                 </div>
+              ) : isMarkdownPath(activePath) && markdownPreviewMode[activePath] === "preview" ? (
+                <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
+                  <MarkdownPreview path={activePath} content={activeBuffer.value} />
+                </Suspense>
               ) : (
                 <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
                   <CodeEditor
@@ -688,8 +790,6 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
         onClose={() => setPalette((p) => ({ ...p, open: false }))}
         onOpenFile={openFile}
       />
-
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} initialSection={settingsSection} />
 
       <Toast message={notice} onDismiss={() => setNotice(null)} />
     </div>

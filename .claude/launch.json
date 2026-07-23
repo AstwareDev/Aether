@@ -5,13 +5,14 @@
       "name": "desktop-vite",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--dir", "desktop", "dev"],
-      "port": 1420
+      "port": 1420,
+      "autoPort": true
     },
     {
       "name": "desktop-vite-preview",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "desktop", "dev", "--port", "5183", "--strictPort"],
-      "port": 5183
+      "runtimeArgs": ["--dir", "desktop", "dev"],
+      "autoPort": true
     }
   ]
 }

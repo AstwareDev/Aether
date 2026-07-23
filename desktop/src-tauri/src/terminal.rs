@@ -1,9 +1,3 @@
-//! Real interactive shell sessions backing the Terminal panel.
-//!
-//! Bridged to the frontend the same way `ai.rs` streams tokens: an
-//! `ipc::Channel` handed to the spawn command, held onto by a background
-//! reader thread for the life of the session.
-
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -23,21 +17,13 @@ struct PtySession {
 #[derive(Default)]
 pub struct PtyMap(Arc<Mutex<HashMap<String, PtySession>>>);
 
-/// Streamed back to the frontend for a given session id.
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PtyEvent {
-    /// Base64-encoded raw bytes read from the pty. Base64 (rather than
-    /// assuming each read lands on a UTF-8 boundary) lets the frontend decode
-    /// incrementally with a streaming `TextDecoder`, which is what actually
-    /// handles multi-byte characters split across reads.
     Output { data: String },
     Exit { code: i32 },
 }
 
-/// `shell` is the id picked in the terminal panel's shell dropdown
-/// (`"powershell"` / `"cmd"`); anything else falls back to PowerShell. Not
-/// meaningful outside Windows, where `$SHELL` always wins.
 fn shell_command(shell: &str, cwd: &str) -> CommandBuilder {
     let mut cmd = if cfg!(target_os = "windows") {
         match shell {
@@ -52,8 +38,6 @@ fn shell_command(shell: &str, cwd: &str) -> CommandBuilder {
     cmd
 }
 
-/// Spawn a shell in `cwd` and start streaming its output over `on_event`.
-/// Returns once the session is registered; output/exit arrive asynchronously.
 #[tauri::command]
 pub fn pty_spawn(
     id: String,
@@ -126,7 +110,6 @@ pub fn pty_spawn(
     Ok(())
 }
 
-/// Write raw keystrokes/paste data to a session's shell.
 #[tauri::command]
 pub fn pty_write(id: String, data: String, state: State<PtyMap>) -> Result<(), String> {
     let mut map = state.0.lock().unwrap();
@@ -138,7 +121,6 @@ pub fn pty_write(id: String, data: String, state: State<PtyMap>) -> Result<(), S
     session.writer.flush().map_err(|e| e.to_string())
 }
 
-/// Reflow a session's pty to match the terminal widget's new size.
 #[tauri::command]
 pub fn pty_resize(id: String, cols: u16, rows: u16, state: State<PtyMap>) -> Result<(), String> {
     let map = state.0.lock().unwrap();
@@ -154,7 +136,6 @@ pub fn pty_resize(id: String, cols: u16, rows: u16, state: State<PtyMap>) -> Res
         .map_err(|e| format!("failed to resize pty: {e}"))
 }
 
-/// Forcefully end a session (e.g. the workspace is closing).
 #[tauri::command]
 pub fn pty_kill(id: String, state: State<PtyMap>) -> Result<(), String> {
     if let Some(mut session) = state.0.lock().unwrap().remove(&id) {

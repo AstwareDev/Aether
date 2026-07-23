@@ -12,11 +12,21 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Aether",
         "width": 1600,
         "height": 900,
         "decorations": false,
         "center": true
+      },
+      {
+        "label": "ai-ide",
+        "title": "Aether Code",
+        "width": 1200,
+        "height": 800,
+        "decorations": false,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {

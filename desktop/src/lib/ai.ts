@@ -1,13 +1,7 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { useSyncExternalStore } from "react";
 import type { AiSettings, AiEvent, CompletionOptions } from "../types";
-export type { Brain } from "../types";
-
-// ---------------------------------------------------------------------------
-// Settings — which "brain" powers the inline AI editor, plus its credentials.
-// Persisted to localStorage. The API key lives on-device only; all network
-// calls are made from Rust (see src-tauri/src/ai.rs), never from the webview.
-// ---------------------------------------------------------------------------
+export type { Brain, ReasoningEffort } from "../types";
 
 export const CLAUDE_MODELS: { id: string; label: string }[] = [
   { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
@@ -17,6 +11,13 @@ export const CLAUDE_MODELS: { id: string; label: string }[] = [
 
 export const MERCURY_MODEL = "mercury-2";
 
+export const EFFORT_LEVELS: { id: string; label: string; icon: string }[] = [
+  { id: "instant", label: "Instant", icon: "zap" },
+  { id: "low", label: "Low", icon: "arrow-right" },
+  { id: "medium", label: "Medium", icon: "arrow-bounce" },
+  { id: "high", label: "High", icon: "radar" },
+];
+
 const DEFAULTS: AiSettings = {
   brain: "mercury",
   claudeModel: "claude-opus-4-8",
@@ -24,6 +25,7 @@ const DEFAULTS: AiSettings = {
   lmStudioBaseUrl: "http://localhost:1234",
   lmStudioModel: "",
   maxTokens: 4096,
+  reasoningEffort: "medium",
 };
 
 const STORAGE_KEY = "aether:ai";
@@ -54,7 +56,6 @@ export function setAiSetting<K extends keyof AiSettings>(key: K, value: AiSettin
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    /* storage unavailable — keep in-memory */
   }
   emit();
 }
@@ -64,12 +65,10 @@ export function subscribeAiSettings(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** React hook: subscribe a component to the whole AI settings object. */
 export function useAiSettings(): AiSettings {
   return useSyncExternalStore(subscribeAiSettings, getAiSettings, () => DEFAULTS);
 }
 
-/** Human label for the active brain + model, e.g. "Mercury 2". */
 export function activeBrainLabel(s: AiSettings = state): string {
   if (s.brain === "mercury") {
     return "Mercury 2";
@@ -80,22 +79,11 @@ export function activeBrainLabel(s: AiSettings = state): string {
   return s.lmStudioModel ? `LM Studio · ${s.lmStudioModel}` : "LM Studio";
 }
 
-/** True when the active brain has enough config to run a request. */
 export function isBrainReady(s: AiSettings = state): boolean {
-  if (s.brain === "mercury") return true; // playground endpoint — no key needed
+  if (s.brain === "mercury") return true;
   return s.brain === "claude" ? s.apiKey.trim().length > 0 : s.lmStudioModel.trim().length > 0;
 }
 
-// ---------------------------------------------------------------------------
-// Completion bridge
-// ---------------------------------------------------------------------------
-
-
-
-/**
- * Stream a completion from the active brain. Resolves when the stream ends,
- * rejects with an Error on failure. Tokens arrive via `onToken`/`onReplace`.
- */
 export async function runCompletion({
   system,
   messages,
@@ -118,6 +106,7 @@ export async function runCompletion({
           system,
           messages,
           maxTokens: s.maxTokens,
+          reasoningEffort: s.reasoningEffort,
         }
       : s.brain === "claude"
         ? {
@@ -144,26 +133,16 @@ export async function runCompletion({
   }
 }
 
-/** List models exposed by an LM Studio / OpenAI-compatible server. */
 export async function listLmStudioModels(baseUrl: string): Promise<string[]> {
   return invoke<string[]>("ai_list_models", { baseUrl });
 }
 
-// ---------------------------------------------------------------------------
-// Prompts (adapted from Cursor's inline-agent system prompts)
-// ---------------------------------------------------------------------------
-
 const EDIT_SELECTION_BASE =
-  "You are a highly knowledgeable, detail-oriented programming assistant. Keep responses clear, concise, and context-aware. Analyze code critically, follow instructions precisely, and consider code formatting and surroundings. Insert code at given points, preserving indentation. Avoid unnecessary explanations or imports. Output only what is required.";
+  "You are a highly knowledgeable, detail-oriented programming assistant. The user provides a FILE section (compact line-numbered context around their cursor) and a SELECTED CODE section (the exact code to modify). Focus on the SELECTED CODE when making changes — the FILE context is for reference only. Keep responses clear, concise, and context-aware. Insert code at given points, preserving indentation. Avoid unnecessary explanations or imports. Output only what is required.";
 
 const QUICK_QUESTION_BASE =
-  "You are an intelligent programmer. A colleague is writing code in a file, and has a quick question. Provide a concise, direct answer with clear reasoning. Use Markdown syntax — always tag fenced code blocks with a language (e.g. ```ts) when the content is code. Only answer what is asked—nothing more.";
+  "You are an intelligent programmer. A colleague is writing code and has a quick question. They provide a FILE section (compact line-numbered context around their cursor) and a SELECTED CODE section (the exact code they're asking about). Focus on the SELECTED CODE when answering — the FILE context is for reference. Provide a concise, direct answer with clear reasoning. Use Markdown syntax — always tag fenced code blocks with a language (e.g. ```ts) when the content is code. Only answer what is asked—nothing more.";
 
-/**
- * Build a system prompt for the given mode, computed fresh per call (not a
- * frozen constant) so it always reflects the current date — this matters for
- * a long-running app session that can cross midnight.
- */
 export function buildSystemPrompt(mode: "edit" | "question"): string {
   const today = new Intl.DateTimeFormat("en-US", {
     weekday: "long",

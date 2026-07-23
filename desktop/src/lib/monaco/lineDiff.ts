@@ -1,13 +1,8 @@
 import type { DiffHunk } from "../../types";
 export type { DiffHunk } from "../../types";
 
-/** Above this many lines on either side we stop doing O(n·m) LCS. */
 const MAX_DIFF_LINES = 2000;
 
-/**
- * Split into lines, dropping the phantom empty segment a trailing newline
- * produces — so "a\n" and "a" compare equal instead of diffing a ghost line.
- */
 function splitLines(text: string): string[] {
   if (text === "") return [];
   const lines = text.split("\n");
@@ -15,10 +10,6 @@ function splitLines(text: string): string[] {
   return lines;
 }
 
-/**
- * Compute the line diff between `original` and `proposed` as a list of hunks
- * in proposed-text order. Identical inputs produce no hunks.
- */
 export function computeLineDiff(original: string, proposed: string): DiffHunk[] {
   if (original === proposed) return [];
 
@@ -31,7 +22,6 @@ export function computeLineDiff(original: string, proposed: string): DiffHunk[] 
     return [{ proposedStartLine: 0, addedCount: m, removedLines: a }];
   }
 
-  // dp[i*(m+1)+j] = LCS length of a[i..] and b[j..].
   const width = m + 1;
   const dp = new Uint32Array((n + 1) * width);
   for (let i = n - 1; i >= 0; i--) {
@@ -43,7 +33,6 @@ export function computeLineDiff(original: string, proposed: string): DiffHunk[] 
     }
   }
 
-  // Walk the table, grouping every maximal run of changes into one hunk.
   const hunks: DiffHunk[] = [];
   let i = 0;
   let j = 0;

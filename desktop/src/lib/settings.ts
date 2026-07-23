@@ -2,10 +2,11 @@ import { useSyncExternalStore } from "react";
 import type { Settings } from "../types";
 
 const DEFAULTS: Settings = {
-  iconTheme: "flow-deep",
+  iconTheme: "aether",
   sidebarVisible: true,
   sidebarWidth: 256,
   terminalVisible: false,
+  layoutMode: "aether",
 };
 
 const STORAGE_KEY = "aether:settings";
@@ -41,7 +42,6 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    /* storage unavailable — keep in-memory */
   }
   emit();
 }
@@ -50,7 +50,6 @@ export function toggleSetting(key: { [K in keyof Settings]: Settings[K] extends 
   setSetting(key, !state[key] as never);
 }
 
-/** Subscribe a component to a single setting. */
 export function useSetting<K extends keyof Settings>(key: K): Settings[K] {
   return useSyncExternalStore(
     subscribe,

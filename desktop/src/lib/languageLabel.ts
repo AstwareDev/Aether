@@ -1,9 +1,5 @@
 import { baseName, extensionOf } from "./fs";
 
-// Kept free of any Monaco imports so the status bar / breadcrumbs don't
-// pull the editor's language grammars into the main bundle.
-
-/** A human-friendly language name for the status bar. */
 export function languageLabelForPath(path: string): string {
   if (baseName(path) === "Dockerfile") return "Dockerfile";
 
@@ -40,9 +36,26 @@ export function languageLabelForPath(path: string): string {
     case "py":
     case "pyi":
       return "Python";
+    case "png":
+      return "PNG Image";
+    case "jpg":
+    case "jpeg":
+      return "JPEG Image";
+    case "gif":
+      return "GIF Image";
+    case "webp":
+      return "WebP Image";
+    case "svg":
+      return "SVG Image";
+    case "bmp":
+      return "BMP Image";
+    case "ico":
+      return "Icon";
     case "yaml":
     case "yml":
       return "YAML";
+    case "drawio":
+      return "Drawio";
     case "xml":
       return "XML";
     case "sh":

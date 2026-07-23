@@ -64,7 +64,7 @@ function statusColor(status: string): string {
 // ---------------------------------------------------------------------------
 
 export default function SourceControl({ rootPath, onOpenDiff }: SourceControlProps) {
-  const [viewMode, setViewMode] = useState<"changes" | "history">("changes");
+  const [viewMode, setViewMode] = useState<"changes" | "history" | "agent">("changes");
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -72,6 +72,7 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
   const [committing, setCommitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: GitFile } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const refresh = useCallback(async () => {
@@ -161,6 +162,17 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
     }
   }, [files, rootPath]);
 
+  const handleRevertFile = useCallback(async (filePath: string) => {
+    setError(null);
+    try {
+      await invoke("git_checkout_file", { root: rootPath, filePath });
+      await refresh();
+      setContextMenu(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [rootPath, refresh]);
+
   const hasChanges = files.length > 0;
 
   return (
@@ -193,24 +205,42 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         <button
           type="button"
           onClick={() => setViewMode("changes")}
-          className={`rounded-l-md border px-3 py-1 text-[11px] font-medium transition-colors ${
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-l-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
             viewMode === "changes"
               ? "border-accent/40 bg-accent/10 text-white"
               : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
           }`}
         >
-          Changes
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          <span className="truncate">Changes</span>
         </button>
         <button
           type="button"
           onClick={() => setViewMode("history")}
-          className={`-ml-px rounded-r-md border px-3 py-1 text-[11px] font-medium transition-colors ${
+          className={`-ml-px flex flex-1 items-center justify-center gap-1.5 border px-2 py-1.5 text-[11px] font-medium transition-colors ${
             viewMode === "history"
               ? "border-accent/40 bg-accent/10 text-white"
               : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
           }`}
         >
-          History
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="truncate">History</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("agent")}
+          className={`-ml-px flex flex-1 items-center justify-center gap-1.5 rounded-r-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+            viewMode === "agent"
+              ? "border-accent/40 bg-accent/10 text-white"
+              : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+          }`}
+        >
+          <AgentSvg />
+          <span className="truncate">Agent Review</span>
         </button>
       </div>
 
@@ -276,11 +306,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         </div>
       </div>
 
-      {/* Agent Review — disabled with tooltip */}
-      <div className="mx-3 mb-2">
-        <AgentReviewButton />
-      </div>
-
       {/* Divider */}
       <div className="mx-3 mb-1 border-t border-white/[0.05]" />
 
@@ -311,6 +336,10 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
                   <button
                     type="button"
                     onClick={() => onOpenDiff?.(f.path)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, file: f });
+                    }}
                     title="View diff"
                     className="group flex w-full items-center gap-1.5 px-4 py-[3px] text-left transition-colors text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
                   >
@@ -335,59 +364,97 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         ) : null}
       </div>
         </>
-      ) : (
+      ) : viewMode === "history" ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
           <CommitHistory rootPath={rootPath} />
         </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center px-8 py-12">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <AgentSvg />
+            <div>
+              <p className="text-[13px] font-medium text-zinc-300">Agent Review</p>
+              <p className="mt-1 text-[11px] text-zinc-500">Under Development</p>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* Context menu */}
+      <AnimatePresence>
+        {contextMenu && (
+          <FileContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            file={contextMenu.file}
+            onClose={() => setContextMenu(null)}
+            onRevert={() => handleRevertFile(contextMenu.file.path)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Agent Review button (disabled, tooltip)
+// File Context Menu
 // ---------------------------------------------------------------------------
 
-function AgentReviewButton() {
-  const [show, setShow] = useState(false);
+function FileContextMenu({
+  x,
+  y,
+  file,
+  onClose,
+  onRevert,
+}: {
+  x: number;
+  y: number;
+  file: GitFile;
+  onClose: () => void;
+  onRevert: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const adjustedX = Math.min(x, window.innerWidth - 200);
+  const adjustedY = Math.min(y, window.innerHeight - 100);
 
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onTouchStart={() => setShow(true)}
-      onTouchEnd={() => setShow(false)}
-      onFocus={() => setShow(true)}
-      onBlur={() => setShow(false)}
-      tabIndex={-1}
-    >
-      <button
-        type="button"
-        disabled
-        className="flex h-7 w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md border border-white/[0.12] text-[12px] text-zinc-500 opacity-60 bg-[#18181b]"
-        aria-label="Agent Review — under development"
-      >
-        <AgentSvg />
-        Agent Review
-        <QuestionSvg />
-   
-      </button>
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onMouseDown={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
 
-      <AnimatePresence>
-        {show && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.14 }}
-            className="pointer-events-none absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded border border-zinc-800 bg-[#111112] px-2.5 py-[2px] text-[11px] text-zinc-400 shadow-lg z-10"
-          >
-            Under development
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+      <motion.div
+        role="menu"
+        initial={{ opacity: 0, scale: 0.97, y: -4 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97 }}
+        transition={{ duration: 0.08 }}
+        style={{ left: adjustedX, top: adjustedY }}
+        className="fixed z-50 w-[180px] overflow-hidden rounded-lg border border-white/[0.05] bg-[#0d0d0d] py-1 shadow-[0_8px_40px_rgba(0,0,0,0.85)] text-[13px]"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onRevert();
+            onClose();
+          }}
+          className="flex w-full items-center gap-2 px-3 py-[5px] text-left text-red-400 transition-colors hover:bg-red-500/[0.12] cursor-pointer"
+        >
+          <span>Discard Changes</span>
+        </button>
+      </motion.div>
+    </>
   );
 }
 
