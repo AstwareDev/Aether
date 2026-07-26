@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { motion, AnimatePresence } from "motion/react";
-import { runCompletion, getAiSettings, isBrainReady } from "../lib/ai";
+import { runReview, generateCommitMessage, isTaskReady, taskLabel, taskSetupMessage, openAiSettings, useAiConfig } from "../lib/ai";
 import { FileTypeIcon } from "../lib/icons";
 import { baseName } from "../lib/fs";
 import CommitHistory from "./CommitHistory";
-import { RefreshSvg, BranchSvg, CheckSvg, SparkSvg, AgentSvg, QuestionSvg } from "../icons";
-import type { GitFile, SourceControlProps } from "../types";
+import { RefreshSvg, BranchSvg, CheckSvg, SparkSvg, AgentSvg } from "../icons";
+import type { GitFile, ReviewIssue, ReviewSeverity, SourceControlProps } from "../types";
 
-// ---------------------------------------------------------------------------
-// Git helpers
-// ---------------------------------------------------------------------------
+const MAX_REVIEW_DIFF_CHARS = 40_000;
+
+const SEVERITY_LABEL: Record<ReviewSeverity, string> = {
+  bug: "Bug",
+  security: "Security",
+  performance: "Performance",
+  improvement: "Improvement",
+};
+
+function severityDot(severity: ReviewSeverity): string {
+  switch (severity) {
+    case "bug": return "bg-red-400";
+    case "security": return "bg-orange-400";
+    case "performance": return "bg-yellow-400";
+    default: return "bg-accent";
+  }
+}
 
 async function gitStatus(root: string): Promise<GitFile[]> {
   return invoke<GitFile[]>("git_status", { root });
@@ -18,6 +32,10 @@ async function gitStatus(root: string): Promise<GitFile[]> {
 
 async function gitDiff(root: string, filePath: string): Promise<string> {
   return invoke<string>("git_diff", { root, filePath });
+}
+
+async function gitDiffStaged(root: string): Promise<string> {
+  return invoke<string>("git_diff_staged", { root });
 }
 
 async function gitStageAll(root: string): Promise<void> {
@@ -28,13 +46,17 @@ async function gitCommit(root: string, message: string): Promise<void> {
   return invoke("git_commit", { root, message });
 }
 
+async function gitPush(root: string): Promise<void> {
+  return invoke("git_push", { root });
+}
+
+async function gitPushSetUpstream(root: string, branch: string): Promise<void> {
+  return invoke("git_push_set_upstream", { root, branch });
+}
+
 async function gitBranch(root: string): Promise<string> {
   return invoke<string>("git_branch", { root });
 }
-
-// ---------------------------------------------------------------------------
-// Status badge
-// ---------------------------------------------------------------------------
 
 function statusLabel(status: string): string {
   switch (status.toUpperCase()) {
@@ -59,10 +81,6 @@ function statusColor(status: string): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
-
 export default function SourceControl({ rootPath, onOpenDiff }: SourceControlProps) {
   const [viewMode, setViewMode] = useState<"changes" | "history" | "agent">("changes");
   const [files, setFiles] = useState<GitFile[]>([]);
@@ -73,7 +91,17 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: GitFile } | null>(null);
+  const [commitDropdownOpen, setCommitDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewIssues, setReviewIssues] = useState<ReviewIssue[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
+
+  const aiConfig = useAiConfig();
+  const reviewModelLabel = taskLabel("review", aiConfig);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -96,27 +124,38 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
     void refresh();
   }, [refresh]);
 
-  const handleCommit = useCallback(async () => {
+  const handleCommit = useCallback(async (mode: "commit" | "commit-push" | "commit-push-upstream") => {
     if (!commitMsg.trim() || files.length === 0) return;
     setCommitting(true);
     setError(null);
+    setCommitDropdownOpen(false);
     try {
       await gitStageAll(rootPath);
       await gitCommit(rootPath, commitMsg.trim());
+
+      if (mode === "commit-push") {
+        await gitPush(rootPath);
+      } else if (mode === "commit-push-upstream") {
+        await gitPushSetUpstream(rootPath, branch);
+      }
+
       setCommitMsg("");
+      setReviewIssues([]);
+      setActiveIssueId(null);
+      setDismissed(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));
     } finally {
       setCommitting(false);
     }
-  }, [commitMsg, files.length, rootPath, refresh]);
+  }, [commitMsg, files.length, rootPath, branch, refresh]);
 
   const generateMessage = useCallback(async () => {
     if (files.length === 0) return;
-    const settings = getAiSettings();
-    if (!isBrainReady(settings)) {
-      setError("Configure an AI model in AI Settings (Ctrl+Shift+P → AI: Settings) first.");
+    if (!isTaskReady("commit")) {
+      setError(taskSetupMessage("commit"));
+      openAiSettings();
       return;
     }
     setGenerating(true);
@@ -124,41 +163,73 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
     setCommitMsg("");
 
     try {
-      // Gather diffs for all changed files (cap at 8 000 chars total)
-      const diffs: string[] = [];
-      let total = 0;
-      for (const f of files) {
-        if (total > 8000) break;
-        try {
-          const d = await gitDiff(rootPath, f.path);
-          if (d) {
-            diffs.push(d);
-            total += d.length;
-          }
-        } catch {
-          // skip
-        }
+      // Staging first is what makes `git diff --cached` the whole changeset,
+      // which is the context the message is supposed to summarize.
+      await gitStageAll(rootPath);
+      const stagedDiff = await gitDiffStaged(rootPath);
+      if (!stagedDiff.trim()) {
+        setError("Nothing staged to describe.");
+        return;
       }
-
-      const diffText = diffs.join("\n---\n").slice(0, 8000);
-      const fileList = files.map((f) => `${f.status} ${f.path}`).join("\n");
-
-      await runCompletion({
-        system:
-          "You generate concise git commit messages. Output ONLY the commit message — no markdown, no explanation, no quotes. Use the imperative mood. Keep the subject line under 72 characters. If there are notable details, add a blank line then a short body.",
-        messages: [
-          {
-            role: "user",
-            content: `Generate a commit message for these changes:\n\nFiles:\n${fileList}\n\nDiff:\n${diffText}`,
-          },
-        ],
-        onToken: (t) => setCommitMsg((prev) => prev + t),
-        onReplace: (t) => setCommitMsg(t),
-      });
+      const message = await generateCommitMessage(stagedDiff, files, (t) =>
+        setCommitMsg((prev) => prev + t),
+      );
+      setCommitMsg(message);
     } catch (e) {
       setError(String(e));
     } finally {
       setGenerating(false);
+    }
+  }, [files, rootPath]);
+
+  const runAgentReview = useCallback(async () => {
+    if (files.length === 0) return;
+    if (!isTaskReady("review")) {
+      setReviewError(taskSetupMessage("review"));
+      openAiSettings();
+      return;
+    }
+    setReviewing(true);
+    setReviewError(null);
+    setReviewIssues([]);
+    setDismissed(new Set());
+
+    try {
+      const settled = await Promise.all(
+        files.map(async (f) => {
+          try {
+            const diff = await gitDiff(rootPath, f.path);
+            return diff.trim() ? { file: f.path, diff } : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      const diffs: { file: string; diff: string }[] = [];
+      let total = 0;
+      for (const entry of settled) {
+        if (!entry) continue;
+        if (total + entry.diff.length > MAX_REVIEW_DIFF_CHARS) continue;
+        total += entry.diff.length;
+        diffs.push(entry);
+      }
+
+      if (diffs.length === 0) {
+        setReviewError("No diffs found to review.");
+        return;
+      }
+      if (diffs.length < settled.filter(Boolean).length) {
+        setReviewError(
+          `Reviewed ${diffs.length} of ${settled.filter(Boolean).length} changed files — the rest exceeded the size budget.`,
+        );
+      }
+
+      setReviewIssues(await runReview(diffs));
+    } catch (e) {
+      setReviewError(String(e));
+    } finally {
+      setReviewing(false);
     }
   }, [files, rootPath]);
 
@@ -175,6 +246,31 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
 
   const hasChanges = files.length > 0;
 
+  const visibleIssues = reviewIssues.filter((i) => !dismissed.has(i.id));
+
+  const revealIssue = useCallback((issue: ReviewIssue) => {
+    setActiveIssueId(issue.id);
+    window.dispatchEvent(new CustomEvent("aether:reveal-review-issue", { detail: issue }));
+  }, []);
+
+  // The annotation card owns Dismiss once it is open, so mirror it back here.
+  useEffect(() => {
+    const onDismiss = (e: Event) => {
+      const issue = (e as CustomEvent).detail as ReviewIssue | undefined;
+      if (!issue) return;
+      setDismissed((prev) => new Set(prev).add(issue.id));
+      setActiveIssueId((current) => (current === issue.id ? null : current));
+    };
+    window.addEventListener("aether:dismiss-review-issue", onDismiss);
+    return () => window.removeEventListener("aether:dismiss-review-issue", onDismiss);
+  }, []);
+
+  const issuesByFile = visibleIssues.reduce<Record<string, ReviewIssue[]>>((acc, issue) => {
+    const key = issue.file || "(unknown)";
+    (acc[key] ??= []).push(issue);
+    return acc;
+  }, {});
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -182,7 +278,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
       transition={{ duration: 0.2 }}
       className="flex min-h-0 flex-1 flex-col"
     >
-      {/* Header row */}
       <div className="group flex items-center justify-between px-2 pb-1">
         <span className="truncate pl-2 text-[11px] font-bold uppercase tracking-wide text-zinc-300">
           Source Control
@@ -200,7 +295,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         </div>
       </div>
 
-      {/* Tab bar */}
       <div className="mx-3 mb-2 flex gap-0">
         <button
           type="button"
@@ -246,7 +340,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
 
       {viewMode === "changes" ? (
         <>
-          {/* Branch pill */}
           {branch && (
             <div className="mx-3 mb-2 flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-1">
               <BranchSvg />
@@ -254,7 +347,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
             </div>
           )}
 
-          {/* Commit message area */}
           <div className="mx-3 mb-1 flex flex-col gap-1">
         <div className="relative">
           <textarea
@@ -266,7 +358,7 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                 e.preventDefault();
-                void handleCommit();
+                void handleCommit("commit");
               }
             }}
             className="scroll-thin w-full resize-none rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-[12px] text-zinc-200 placeholder-zinc-600 outline-none transition-colors focus:border-accent/40 focus:bg-white/[0.06]"
@@ -276,23 +368,77 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
           )}
         </div>
 
-        {/* Commit + AI buttons */}
         <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={handleCommit}
-            disabled={!commitMsg.trim() || !hasChanges || committing}
-            className="flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent/90 text-[12px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {committing ? (
-              "Committing…"
-            ) : (
-              <>
-                <CheckSvg />
-                Commit
-              </>
-            )}
-          </button>
+          <div className="relative flex flex-1">
+            <button
+              type="button"
+              onClick={() => handleCommit("commit")}
+              disabled={!commitMsg.trim() || !hasChanges || committing}
+              className="flex h-7 flex-1 items-center justify-center gap-1.5 rounded-l-md bg-accent/90 text-[12px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {committing ? (
+                "Committing…"
+              ) : (
+                <>
+                  <CheckSvg />
+                  Commit
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommitDropdownOpen(!commitDropdownOpen)}
+              disabled={!commitMsg.trim() || !hasChanges || committing}
+              className="flex h-7 w-6 items-center justify-center rounded-r-md border-l border-black/20 bg-accent/90 text-[12px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <AnimatePresence>
+              {commitDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onMouseDown={() => setCommitDropdownOpen(false)}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.97, y: -4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.97 }}
+                    transition={{ duration: 0.08 }}
+                    className="absolute left-0 top-full z-50 mt-1 w-[220px] overflow-hidden rounded-lg border border-white/[0.05] bg-[#0d0d0d] py-1 shadow-[0_8px_40px_rgba(0,0,0,0.85)]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleCommit("commit")}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                    >
+                      <span className="text-[12px] font-medium text-zinc-200">Commit</span>
+                      <span className="text-[10px] text-zinc-500">Stage and commit changes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCommit("commit-push")}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                    >
+                      <span className="text-[12px] font-medium text-zinc-200">Commit & Push</span>
+                      <span className="text-[10px] text-zinc-500">Commit and push to remote</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCommit("commit-push-upstream")}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                    >
+                      <span className="text-[12px] font-medium text-zinc-200">Commit & Push (Set Upstream)</span>
+                      <span className="text-[10px] text-zinc-500">Commit and set upstream origin</span>
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
 
           <button
             type="button"
@@ -306,10 +452,8 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         </div>
       </div>
 
-      {/* Divider */}
       <div className="mx-3 mb-1 border-t border-white/[0.05]" />
 
-      {/* Error */}
       <AnimatePresence>
         {error && (
           <motion.div
@@ -323,7 +467,6 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         )}
       </AnimatePresence>
 
-      {/* Changes section */}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {hasChanges ? (
           <>
@@ -369,24 +512,115 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
           <CommitHistory rootPath={rootPath} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-8 py-12">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <AgentSvg />
-            <div>
-              <p className="text-[13px] font-medium text-zinc-300">Agent Review</p>
-              <p className="mt-1 text-[11px] text-zinc-500">Under Development</p>
-            </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="mx-3 mb-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={runAgentReview}
+              disabled={!hasChanges || reviewing}
+              className="flex h-7 items-center justify-center gap-1.5 rounded-md bg-accent/90 px-3 text-[12px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {reviewing ? (
+                <>
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-black/40" />
+                  Reviewing…
+                </>
+              ) : (
+                <>
+                  <AgentSvg />
+                  Run Review
+                </>
+              )}
+            </button>
+            {visibleIssues.length > 0 && (
+              <span className="text-[11px] text-zinc-500">
+                {visibleIssues.length} issue{visibleIssues.length !== 1 ? "s" : ""} found
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={openAiSettings}
+              title="Change the Agent Review model in Settings → AI Configuration"
+              className="ml-auto truncate text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"
+            >
+              {reviewModelLabel}
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {reviewError && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mx-3 mb-2 overflow-hidden rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5"
+              >
+                <p className="text-[11px] leading-snug text-amber-300">{reviewError}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3">
+            {Object.keys(issuesByFile).length > 0 ? (
+              Object.entries(issuesByFile).map(([file, issues]) => (
+                <div key={file} className="mb-3">
+                  <div className="mb-1 flex items-center gap-1.5 px-1">
+                    <FileTypeIcon name={baseName(file)} size={12} />
+                    <span className="truncate text-[11px] font-semibold text-zinc-300">{file}</span>
+                    <span className="text-[10px] text-zinc-600">({issues.length})</span>
+                  </div>
+                  <ul className="space-y-1">
+                    {issues.map((issue) => (
+                      <li key={issue.id}>
+                        <button
+                          type="button"
+                          onClick={() => revealIssue(issue)}
+                          title="Jump to line and show details"
+                          className={`w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
+                            activeIssueId === issue.id
+                              ? "border-accent/40 bg-accent/10"
+                              : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04]"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${severityDot(issue.severity)}`} />
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate text-[12px] font-medium text-zinc-200">
+                                {issue.title}
+                              </span>
+                              <span className="mt-0.5 block text-[10px] text-zinc-600">
+                                {SEVERITY_LABEL[issue.severity]} · line {issue.line}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            ) : !reviewing ? (
+              <div className="flex flex-col items-center justify-center px-8 py-12 text-center">
+                <AgentSvg />
+                <p className="mt-3 text-[13px] font-medium text-zinc-300">
+                  {reviewIssues.length > 0 ? "All issues resolved" : "Agent Review"}
+                </p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  {reviewIssues.length > 0
+                    ? "Every issue found in this review has been dismissed."
+                    : "Run a review to have GLM 5 analyze your changes for bugs and regressions."}
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       )}
 
-      {/* Context menu */}
       <AnimatePresence>
         {contextMenu && (
           <FileContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
-            file={contextMenu.file}
             onClose={() => setContextMenu(null)}
             onRevert={() => handleRevertFile(contextMenu.file.path)}
           />
@@ -396,20 +630,14 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
   );
 }
 
-// ---------------------------------------------------------------------------
-// File Context Menu
-// ---------------------------------------------------------------------------
-
 function FileContextMenu({
   x,
   y,
-  file,
   onClose,
   onRevert,
 }: {
   x: number;
   y: number;
-  file: GitFile;
   onClose: () => void;
   onRevert: () => void;
 }) {
@@ -457,5 +685,3 @@ function FileContextMenu({
     </>
   );
 }
-
-

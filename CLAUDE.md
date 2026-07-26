@@ -27,7 +27,7 @@ The project uses a workspace-focused structure with all primary code in `desktop
 **Rust Backend** (`desktop/src-tauri/src/`)
 - `lib.rs`: File I/O (read/write text and base64), directory listing with `ignore` crate (respects .gitignore), Git commands (status, diff, log, commit, branch)
 - `terminal.rs`: PTY sessions via `portable-pty` with streaming output over Tauri channels
-- `ai.rs`: Streaming AI completions from Anthropic, OpenAI, and custom "mercury" provider using `reqwest` with SSE
+- `ai.rs`: Streaming AI completions over two wire protocols (Anthropic Messages, OpenAI chat-completions) using `reqwest` with SSE. Supports native tool calling and reasoning effort on both.
 
 **Icon System** (`desktop/src/lib/icons/`)
 - Generated Material Design icons in `desktop/src/generated/aetherManifest.json`
@@ -86,7 +86,13 @@ pnpm tauri build  # Build desktop app (creates installer in src-tauri/target/rel
 ### Type Checking
 ```bash
 cd desktop
-pnpm exec tsc --noEmit
+pnpm typecheck        # tsc --noEmit
+```
+
+### Build Verification
+```bash
+cd desktop
+pnpm build:check      # pnpm tauri build + error parsing (the pass/fail gate)
 ```
 
 ## Working with Specific Features
@@ -105,7 +111,18 @@ pnpm exec tsc --noEmit
 New language support requires adding the contribution in `desktop/src/lib/monaco/setup.ts` (follow existing pattern of importing from `monaco-editor/esm/vs/basic-languages/`).
 
 ### AI Providers
-The `ai.rs` module supports three providers: `anthropic`, `openai`, and `mercury`. Each implements streaming via Server-Sent Events (SSE). The frontend passes provider config (API key, base URL, model) on each request — no credentials are stored in Rust.
+
+**Two wire protocols, many providers.** `ai.rs` speaks only `anthropic` (`<base>/v1/messages`) and `openai` (`<base>/v1/chat/completions`), both streaming over SSE with **native tool calling** — tool calls round-trip as structured `tool_use`/`tool_result` blocks (Anthropic) or `tool_calls` + `role: "tool"` messages (OpenAI), never flattened into prose. Providers are *data*, not code paths: adding one means adding a `ProviderTemplate` in `desktop/src/lib/ai/providers.ts`, never a new branch in Rust. Built-ins are Omniroute, OpenCode Zen, Anthropic, and LM Studio; users can add their own Anthropic- or OpenAI-compatible endpoint with its own model list from the settings panel.
+
+The frontend passes provider config (API key, base URL, model, effort) on each request — no credentials are stored in Rust. Omniroute build-time defaults come from `VITE_OMNIROUTE_BASE_URL` / `VITE_OMNIROUTE_API_KEY` (see `desktop/.env.example`; `.env` is gitignored); everything is overridable at runtime via localStorage.
+
+**Per-task routing.** Each flow is a `TaskId` (`default`, `inline`, `commit`, `review`, `chat`) mapped to a `TaskAssignment { inherit, providerId, model, effort, maxTokens }`. `resolveTask(id)` (`lib/ai/tasks.ts`) resolves one to a concrete provider+model, following `default` when `inherit` is set. It never silently swaps the provider — a misconfigured one surfaces through `taskSetupMessage()` rather than quietly billing a different endpoint. Use `isTaskReady(id)` before starting a flow; there are no pinned model constants.
+
+**Reasoning effort** maps to `thinking.budget_tokens` on the Anthropic wire and `reasoning_effort` on the OpenAI wire. Reasoning output must never reach the `Delta` stream: inline edit mode applies model output to the editor buffer verbatim, so `thinking_delta` and `reasoning_content` are routed to `AiEvent::Reasoning` instead. Anthropic also requires signed `thinking`/`redacted_thinking` blocks be replayed *before* `tool_use` in a follow-up turn — `agent.ts` does this, and `runAgent`'s `onStepStart` callback exists so consumers accumulating tokens reset per step (step narration is not the final answer).
+
+**Module layout.** `lib/ai/` splits into `providers` (templates) → `store` (persisted config + v1 migration) → `tasks` (resolution) → `transport` (payloads + streaming) → `agent`/`review`/`commit`. `index.ts` re-exports all of it, so `import { … } from "../lib/ai"` keeps working; submodules import each other directly to avoid cycles. Agent tools are declared once in `CODING_TOOLS` (`lib/ai/tools.ts`), filtered by user preference via `enabledTools()`, and executed by `exec_tool` in `lib.rs`, which resolves every path against the workspace root and rejects paths that escape it.
+
+Both stores are built on the `createStore` factory in `desktop/src/lib/store.ts` (localStorage-backed, `useSyncExternalStore`-compatible). When adding a field to a persisted shape, extend the `hydrate` function — it must tolerate configs written by older builds rather than resetting missing fields to empty.
 
 ## Important Files
 
@@ -118,8 +135,9 @@ The `ai.rs` module supports three providers: `anthropic`, `openai`, and `mercury
 
 ## Testing Notes
 
-- No test suite currently exists
-- Manual testing workflow: `pnpm tauri dev`, open a folder, verify file tree, editor, terminal, git, and AI features
+- No unit test suite currently exists
+- **Verification is build-based, not dynamic.** Do not launch or exercise the app to verify changes. Run `pnpm build:check` (wraps `pnpm tauri build` and parses its output for errors); a failing build blocks with the offending error lines, a clean build passes.
+- `pnpm typecheck` for a fast frontend-only check before the full build
 - Test on Windows (primary target) given the `#[cfg(windows)]` specific code paths
 
 ## Tech Stack Summary

@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { motion } from "motion/react";
-import { setAiSetting, useAiSettings, CLAUDE_MODELS, EFFORT_LEVELS, runCompletion } from "../lib/ai";
-import type { AiMessage, Brain, ReasoningEffort } from "../types";
+import {
+  CHAT_SYSTEM,
+  isTaskReady,
+  modelsFor,
+  resolveTask,
+  taskLabel,
+  taskSetupMessage,
+  updateAssignment,
+  useAiConfig,
+  runCompletion,
+} from "../lib/ai";
+import type { AiConfig, AiMessage, Effort } from "../types";
 
 interface AiSession {
   id: string;
@@ -75,15 +85,106 @@ function NewSessionDialog({ open, onClose, onCreateSession }: NewSessionDialogPr
   );
 }
 
+const EFFORTS: Effort[] = ["off", "low", "medium", "high"];
+
+function ModelPicker({
+  open,
+  onToggle,
+  config,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  config: AiConfig;
+}) {
+  const resolved = resolveTask("chat", config);
+  const assignment = config.assignments.chat;
+  const providerId = resolved?.provider.id ?? assignment.providerId;
+  const provider = config.providers.find((p) => p.id === providerId);
+  const models = provider ? modelsFor(provider) : [];
+  const effort = resolved?.effort ?? assignment.effort;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-white/20"
+      >
+        <span className="max-w-[180px] truncate text-xs text-zinc-400">{taskLabel("chat", config)}</span>
+        <svg className="h-3 w-3 shrink-0 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full left-0 mb-2 w-72 space-y-3 rounded-lg border border-white/10 bg-abyss p-3 shadow-2xl">
+          <label className="block">
+            <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Provider</span>
+            <select
+              value={providerId}
+              onChange={(e) =>
+                updateAssignment("chat", { inherit: false, providerId: e.target.value, model: "" })
+              }
+              className="w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-white/25"
+            >
+              {config.providers.map((p) => (
+                <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
+                  {p.enabled ? p.label : `${p.label} (off)`}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Model</span>
+            <select
+              value={resolved?.model ?? assignment.model}
+              disabled={models.length === 0}
+              onChange={(e) => updateAssignment("chat", { inherit: false, model: e.target.value })}
+              className="w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-white/25 disabled:opacity-40"
+            >
+              {models.length === 0 && <option value="">No models configured</option>}
+              {models.map((m) => (
+                <option key={m.id} value={m.id} className="bg-[#1a1a1a]">
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div>
+            <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Reasoning effort</span>
+            <div className="flex gap-1">
+              {EFFORTS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => updateAssignment("chat", { inherit: false, effort: value })}
+                  className={`flex-1 rounded border px-2 py-1 text-[11px] capitalize transition-colors ${
+                    effort === value
+                      ? "border-white/25 bg-white/[0.09] text-zinc-100"
+                      : "border-white/10 text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AiIdeWindow() {
-  const aiSettings = useAiSettings();
+  const aiConfig = useAiConfig();
   const [sessions, setSessions] = useState<AiSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [showEffortDropdown, setShowEffortDropdown] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -96,7 +197,6 @@ export default function AiIdeWindow() {
         setSessions(parsed.sessions || []);
         setActiveSessionId(parsed.activeSessionId || null);
       } catch {
-        // ignore
       }
     }
   }, []);
@@ -141,6 +241,24 @@ export default function AiIdeWindow() {
       const sessionIndex = sessions.findIndex((s) => s.id === activeSessionId);
       if (sessionIndex === -1) return;
 
+      if (!isTaskReady("chat")) {
+        setSessions((prev) => {
+          const updated = [...prev];
+          updated[sessionIndex] = {
+            ...updated[sessionIndex],
+            messages: [
+              ...updated[sessionIndex].messages,
+              userMessage,
+              { role: "assistant", content: taskSetupMessage("chat") },
+            ],
+            updatedAt: Date.now(),
+          };
+          return updated;
+        });
+        setInput("");
+        return;
+      }
+
       setSessions((prev) => {
         const updated = [...prev];
         updated[sessionIndex] = {
@@ -166,13 +284,17 @@ export default function AiIdeWindow() {
         return updated;
       });
 
+      // Built from the pre-update array plus the new turn: `sessions` is the closure
+      // value, so reading it back after setSessions would omit the message just sent.
+      const history = [...sessions[sessionIndex].messages, userMessage].map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
       try {
         await runCompletion({
-          system: "You are a helpful AI assistant integrated into Aether code editor. Provide clear, concise, and accurate responses.",
-          messages: sessions[sessionIndex].messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          system: CHAT_SYSTEM,
+          messages: history,
           onToken: (token) => {
             assistantContent += token;
             setSessions((prev) => {
@@ -202,21 +324,6 @@ export default function AiIdeWindow() {
     [input, activeSessionId, isStreaming, sessions]
   );
 
-  const selectBrain = useCallback((brain: Brain) => {
-    setAiSetting("brain", brain);
-    setShowModelDropdown(false);
-  }, []);
-
-  const selectClaudeModel = useCallback((modelId: string) => {
-    setAiSetting("claudeModel", modelId);
-    setShowModelDropdown(false);
-  }, []);
-
-  const selectEffort = useCallback((effort: ReasoningEffort) => {
-    setAiSetting("reasoningEffort", effort);
-    setShowEffortDropdown(false);
-  }, []);
-
   const handleSelectWorkspace = useCallback(async () => {
     const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
     if (!isTauri || !activeSessionId) return;
@@ -231,7 +338,6 @@ export default function AiIdeWindow() {
 
   return (
     <div className="flex h-screen flex-col bg-canvas text-zinc-200">
-      {/* Top bar with session tabs */}
       <div className="flex items-center border-b border-white/[0.05] bg-abyss px-4">
         <div className="flex flex-1 items-center gap-2 overflow-x-auto py-2">
           {sessions.map((session) => (
@@ -268,8 +374,6 @@ export default function AiIdeWindow() {
             New session
           </button>
         </div>
-
-        {/* Window controls */}
         <div className="flex items-center gap-1">
           <button className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -288,8 +392,6 @@ export default function AiIdeWindow() {
           </button>
         </div>
       </div>
-
-      {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {!activeSession ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
@@ -328,129 +430,15 @@ export default function AiIdeWindow() {
           </div>
         )}
       </div>
-
-      {/* Input area */}
       {activeSession && (
         <div className="border-t border-white/[0.05] bg-abyss px-4 py-3">
           <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
             <div className="flex items-center gap-2">
-              {/* Model selector */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-white/20"
-                >
-                  <span className="text-xs text-zinc-400">
-                    {aiSettings.brain === "mercury"
-                      ? "Mercury 2"
-                      : aiSettings.brain === "claude"
-                        ? CLAUDE_MODELS.find((m) => m.id === aiSettings.claudeModel)?.label
-                        : "LM Studio"}
-                  </span>
-                  <svg className="h-3 w-3 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {showModelDropdown && (
-                  <div className="absolute bottom-full left-0 mb-2 w-56 rounded-lg border border-white/10 bg-abyss p-2 shadow-2xl">
-                    <div className="mb-2 px-2 py-1 text-xs text-zinc-500">Provider</div>
-                    <button
-                      type="button"
-                      onClick={() => selectBrain("mercury")}
-                      className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
-                        aiSettings.brain === "mercury"
-                          ? "bg-white/[0.08] text-zinc-200"
-                          : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                      }`}
-                    >
-                      Mercury 2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectBrain("claude")}
-                      className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
-                        aiSettings.brain === "claude"
-                          ? "bg-white/[0.08] text-zinc-200"
-                          : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                      }`}
-                    >
-                      Claude (Anthropic)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectBrain("lm-studio")}
-                      className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
-                        aiSettings.brain === "lm-studio"
-                          ? "bg-white/[0.08] text-zinc-200"
-                          : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                      }`}
-                    >
-                      LM Studio
-                    </button>
-                    {aiSettings.brain === "claude" && (
-                      <>
-                        <div className="mb-2 mt-3 px-2 py-1 text-xs text-zinc-500">Claude Model</div>
-                        {CLAUDE_MODELS.map((model) => (
-                          <button
-                            key={model.id}
-                            type="button"
-                            onClick={() => selectClaudeModel(model.id)}
-                            className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
-                              aiSettings.claudeModel === model.id
-                                ? "bg-white/[0.08] text-zinc-200"
-                                : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                            }`}
-                          >
-                            {model.label}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Effort selector (Mercury only) */}
-              {aiSettings.brain === "mercury" && (
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowEffortDropdown(!showEffortDropdown)}
-                    className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-white/20"
-                  >
-                    <span className="text-xs text-zinc-400">
-                      {EFFORT_LEVELS.find((e) => e.id === aiSettings.reasoningEffort)?.label || "Medium"}
-                    </span>
-                    <svg className="h-3 w-3 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-
-                  {showEffortDropdown && (
-                    <div className="absolute bottom-full left-0 mb-2 w-40 rounded-lg border border-white/10 bg-abyss p-2 shadow-2xl">
-                      <div className="mb-2 px-2 py-1 text-xs text-zinc-500">Effort</div>
-                      {EFFORT_LEVELS.map((effort) => (
-                        <button
-                          key={effort.id}
-                          type="button"
-                          onClick={() => selectEffort(effort.id as ReasoningEffort)}
-                          className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
-                            aiSettings.reasoningEffort === effort.id
-                              ? "bg-white/[0.08] text-zinc-200"
-                              : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                          }`}
-                        >
-                          {effort.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Workspace selector */}
+              <ModelPicker
+                open={showModelDropdown}
+                onToggle={() => setShowModelDropdown((v) => !v)}
+                config={aiConfig}
+              />
               <button
                 type="button"
                 onClick={handleSelectWorkspace}

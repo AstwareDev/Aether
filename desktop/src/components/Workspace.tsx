@@ -13,7 +13,8 @@ import {
   renameEntry,
   writeFileText,
 } from "../lib/fs";
-import type { IndexedFile } from "../types";
+import type { IndexedFile, ReviewIssue } from "../types";
+import { setWorkspaceContext } from "../lib/workspace";
 import { folderName } from "../lib/recentFolders";
 import { languageLabelForPath } from "../lib/languageLabel";
 import { getIconTheme, iconThemes } from "../lib/icons";
@@ -21,7 +22,7 @@ import { setSetting, useSetting } from "../lib/settings";
 import type { Command, TreeActions, ViewId, OpenTab, CursorPos, PaletteMode, WorkspaceProps, FileBuffer, SettingsSection } from "../types";
 import { SETTINGS_URI } from "../types";
 import Sidebar from "./Sidebar";
-import SettingsPanel from "./SettingsDialog";
+import SettingsPanel from "./SettingsPanel";
 import TerminalPanel from "./TerminalPanel";
 import EditorTabs from "./EditorTabs";
 import MonacoDiffEditor from "./MonacoDiffEditor";
@@ -190,9 +191,13 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     listFiles(path)
       .then((fetched) => {
         setFiles(fetched);
+        setWorkspaceContext(path, fetched);
         scheduleWorkspaceModelSync(fetched);
       })
-      .catch(() => setFiles([]));
+      .catch(() => {
+        setFiles([]);
+        setWorkspaceContext(path, []);
+      });
   }, [path]);
 
   useEffect(() => {
@@ -224,6 +229,23 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     },
     [],
   );
+
+  // Agent Review asks to reveal an issue: open the owning file, then hand the
+  // issue to the editor, which owns the inline annotation card.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const issue = (e as CustomEvent).detail as ReviewIssue | undefined;
+      if (!issue) return;
+      const filePath = joinPath(path, issue.file);
+      void openFile(filePath).then(() => {
+        window.dispatchEvent(
+          new CustomEvent("aether:show-review-annotation", { detail: { ...issue, path: filePath } }),
+        );
+      });
+    };
+    window.addEventListener("aether:reveal-review-issue", handler);
+    return () => window.removeEventListener("aether:reveal-review-issue", handler);
+  }, [path, openFile]);
 
   const closeTab = useCallback((filePath: string) => {
     setOpenPaths((prev) => {
@@ -709,7 +731,7 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
 
           <div className="min-h-0 flex-1">
             {isSettingsTab ? (
-              <SettingsPanel section={settingsSection} onSectionChange={handleSettingsSectionChange} />
+              <SettingsPanel section={settingsSection} />
             ) : activePath && isDiffPath(activePath) ? (
               activeDiffData ? (
                 <MonacoDiffEditor

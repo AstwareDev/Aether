@@ -2,17 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "desktop-vite",
+      "name": "desktop-build-check",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "desktop", "dev"],
-      "port": 1420,
-      "autoPort": true
-    },
-    {
-      "name": "desktop-vite-preview",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "desktop", "dev"],
-      "autoPort": true
+      "runtimeArgs": ["--dir", "desktop", "build:check"]
     }
   ]
 }

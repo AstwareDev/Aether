@@ -2,31 +2,26 @@ import { monaco } from "./setup";
 import { languageLabelForPath } from "../languageLabel";
 import { dirName } from "../fs";
 import { resolveWorkspaceImport, getWorkspaceModelText } from "./workspaceModels";
+import { getWorkspaceRoot, toRelativePath, buildProjectTree } from "../workspace";
 import { renderMarkdown, colorizeCodeBlocks } from "./markdown";
 import { computeLineDiff, type DiffHunk } from "./lineDiff";
 import {
-  runCompletion,
-  getAiSettings,
-  setAiSetting,
-  isBrainReady,
-  subscribeAiSettings,
-  EFFORT_LEVELS,
+  runAgent,
   buildSystemPrompt,
+  describeToolCall,
+  enabledTools,
+  getAiConfig,
+  isTaskReady,
+  modelsFor,
+  openAiSettings,
+  resolveTask,
+  subscribeAiConfig,
+  taskSetupMessage,
+  updateAssignment,
 } from "../ai";
+import type { Effort } from "../../types";
 import type { ChatMessage } from "../../types";
 import type { Mode, AiState } from "../../types";
-
-const EFFORT_SVGS: Record<string, string> = {
-  instant:
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>`,
-  low:
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/></svg>`,
-  medium:
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,17 10,11 14,15 20,9"/><polyline points="14,9 20,9 20,15"/></svg>`,
-  high:
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
-};
-
 
 class AiStore {
   private state: AiState | null = null;
@@ -58,6 +53,7 @@ class AiStore {
       status: "input",
       turns: [],
       streamingText: "",
+      activity: "",
       error: "",
     });
   }
@@ -78,6 +74,7 @@ class AiStore {
       turns: [...this.state.turns, { role: "user", content }],
       status: "streaming",
       streamingText: "",
+      activity: "",
       error: "",
     });
   }
@@ -85,7 +82,20 @@ class AiStore {
   /** Re-run the last (already-pushed) user turn without duplicating it. */
   retryStream() {
     if (!this.state) return;
-    this.set({ ...this.state, status: "streaming", streamingText: "", error: "" });
+    this.set({ ...this.state, status: "streaming", streamingText: "", activity: "", error: "" });
+  }
+
+  /** Drop text streamed so far in this turn. Called at each agent step boundary: a
+   *  step that ends in a tool call produced narration, and in edit mode the
+   *  accumulated text is what gets applied to the buffer. */
+  resetStreaming() {
+    if (!this.state || this.state.streamingText === "") return;
+    this.set({ ...this.state, streamingText: "" });
+  }
+
+  setActivity(activity: string) {
+    if (!this.state || this.state.activity === activity) return;
+    this.set({ ...this.state, activity });
   }
 
   cancelStream() {
@@ -95,18 +105,13 @@ class AiStore {
       gen: this.state.gen + 1,
       status: "input",
       streamingText: "",
+      activity: "",
     });
   }
 
   appendStreaming(text: string) {
     if (!this.state) return;
     this.set({ ...this.state, streamingText: this.state.streamingText + text });
-  }
-
-  /** Diffusion models (Mercury) send the whole message-so-far per chunk. */
-  replaceStreaming(text: string) {
-    if (!this.state) return;
-    this.set({ ...this.state, streamingText: text });
   }
 
   finishTurn() {
@@ -117,6 +122,7 @@ class AiStore {
       ...this.state,
       turns: [...this.state.turns, { role: "assistant", content, code }],
       streamingText: "",
+      activity: "",
       status: "done",
     });
   }
@@ -226,7 +232,6 @@ function buildCompactFileBody(model: monaco.editor.ITextModel, from: number, to:
   return parts.join("\n");
 }
 
-const MAX_RELATED_FILES = 5;
 const MAX_RELATED_FILE_CHARS = 2000;
 
 // Good enough to spot related files without a full parser: matches the
@@ -241,12 +246,14 @@ function scanImportSpecifiers(source: string): string[] {
  * One-hop related-file context: files the current one statically imports,
  * resolved against the workspace-wide background models (see
  * lib/monaco/workspaceModels.ts) so the AI isn't limited to whatever text
- * the user manually pasted in. Bounded by file count and per-file size —
- * same truncation philosophy as `buildFileBody`'s MAX_FULL_DOC — so this
- * stays a targeted one-hop lookup, not a whole-repo dump.
+ * the user manually pasted in. Bounded by the configured file budget and
+ * per-file size so this stays a targeted one-hop lookup, not a whole-repo
+ * dump — the agent can pull anything further with its tools.
  */
 function buildRelatedFilesContext(model: monaco.editor.ITextModel, path: string): string {
   if (!path) return "";
+  const budget = getAiConfig().relatedFileBudget;
+  if (budget <= 0) return "";
   const dir = dirName(path);
 
   const resolved: string[] = [];
@@ -256,21 +263,22 @@ function buildRelatedFilesContext(model: monaco.editor.ITextModel, path: string)
     if (!target || target === path || seen.has(target)) continue;
     seen.add(target);
     resolved.push(target);
-    if (resolved.length >= MAX_RELATED_FILES) break;
+    if (resolved.length >= budget) break;
   }
   if (resolved.length === 0) return "";
 
-  return (
-    resolved
-      .map((relPath) => {
-        const text = getWorkspaceModelText(relPath) ?? "";
-        const truncated =
-          text.length > MAX_RELATED_FILE_CHARS ? `${text.slice(0, MAX_RELATED_FILE_CHARS)}\n…(truncated)` : text;
-        return `Related file: ${relPath}\n${truncated}`;
-      })
-      .join("\n\n") + "\n\n"
-  );
+  const blocks = resolved.map((relPath) => {
+    const text = getWorkspaceModelText(relPath) ?? "";
+    const truncated =
+      text.length > MAX_RELATED_FILE_CHARS
+        ? `${text.slice(0, MAX_RELATED_FILE_CHARS)}\n…(truncated — use read_file for the rest)`
+        : text;
+    return `--- ${toRelativePath(relPath)} ---\n${truncated}`;
+  });
+
+  return `IMPORTED FILES (one hop from the current file):\n${blocks.join("\n\n")}`;
 }
+
 
 /**
  * Build the request for the LATEST turn in `state.turns` (already pushed).
@@ -288,34 +296,46 @@ function buildRequest(
 
   let body = latest.content;
   if (isFirst) {
+    const relPath = path ? toRelativePath(path) : "";
     const lang = path ? languageLabelForPath(path) : "code";
-    const relatedContext = buildRelatedFilesContext(model, path);
-    const fileBody = buildCompactFileBody(model, state.originalFrom, state.originalTo);
     const startPos = model.getPositionAt(state.originalFrom);
     const endPos = model.getPositionAt(state.originalTo);
     const hasSelection = state.originalFrom < state.originalTo && state.originalText.length > 0;
 
-    let context = `FILE: ${path || "(untitled)"} (${lang})\n\`\`\`${lang}\n${fileBody}\n\`\`\`\n\n`;
-    if (relatedContext) context = relatedContext + "\n" + context;
+    const sections: string[] = [];
 
-    if (hasSelection) {
-      context +=
-        `SELECTED CODE (lines ${startPos.lineNumber}-${endPos.lineNumber}):\n` +
-        `\`\`\`${lang}\n${state.originalText}\n\`\`\`\n\n`;
-    } else {
-      context += `Cursor at line ${startPos.lineNumber}, column ${startPos.column}\n\n`;
-    }
+    const root = getWorkspaceRoot();
+    if (root) sections.push(`WORKSPACE ROOT: ${root}\nAll tool paths are relative to this root.`);
 
-    const label = state.mode === "edit" ? "INSTRUCTION" : "QUESTION";
-    body = context + `${label}: ${latest.content}`;
+    const tree = buildProjectTree(path);
+    if (tree) sections.push(tree);
+
+    const related = buildRelatedFilesContext(model, path);
+    if (related) sections.push(related);
+
+    sections.push(
+      `CURRENT FILE: ${relPath || "(untitled)"} (${lang}, ${model.getLineCount()} lines)\n` +
+        `\`\`\`${lang}\n${buildCompactFileBody(model, state.originalFrom, state.originalTo)}\n\`\`\``,
+    );
+
+    sections.push(
+      hasSelection
+        ? `SELECTED CODE (lines ${startPos.lineNumber}-${endPos.lineNumber}) — replace exactly this span:\n` +
+            `\`\`\`${lang}\n${state.originalText}\n\`\`\``
+        : `CURSOR: line ${startPos.lineNumber}, column ${startPos.column} (no selection — generate code to insert here)`,
+    );
+
+    sections.push(`${state.mode === "edit" ? "INSTRUCTION" : "QUESTION"}: ${latest.content}`);
+    body = sections.join("\n\n");
   }
 
   const messages: ChatMessage[] = [
     ...state.turns.slice(0, -1).map((t) => ({ role: t.role, content: t.content })),
     { role: "user", content: body },
   ];
-  return { system: buildSystemPrompt(state.mode), messages };
+  return { system: buildSystemPrompt(state.mode, enabledTools().length > 0), messages };
 }
+
 
 /** Strip a wrapping markdown code fence, if the model added one anyway. */
 function stripFences(text: string): string {
@@ -332,11 +352,7 @@ function kbd(text: string): HTMLElement {
   return el;
 }
 
-// ---------------------------------------------------------------------------
-// Selection popover — the little pill that floats near the caret end of a
-// selection ("Add to Chat Ctrl+L" / "Quick Edit Ctrl+K").
-// ---------------------------------------------------------------------------
-
+/** Floating pill near the caret end of a selection ("Add to Chat" / "Quick Edit"). */
 class SelectionPopover implements monaco.editor.IContentWidget {
   allowEditorOverflow = true;
 
@@ -393,10 +409,7 @@ class SelectionPopover implements monaco.editor.IContentWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Per-hunk action pill — the tiny ✓/✕ control floating above each diff hunk.
-// ---------------------------------------------------------------------------
-
+/** The ✓/✕ control floating above each diff hunk. */
 interface HunkUi {
   addedCount: number;
   removedLines: string[];
@@ -422,10 +435,6 @@ class AiWidget implements monaco.editor.IContentWidget {
   private modeDropdownBtn!: HTMLButtonElement;
   private modeLabel!: HTMLSpanElement;
   private modeMenu!: HTMLDivElement;
-  private effortTrigger!: HTMLButtonElement;
-  private effortIcon!: HTMLSpanElement;
-  private effortLabel!: HTMLSpanElement;
-  private effortMenu!: HTMLDivElement;
   private questionSeparator!: HTMLDivElement;
   private diffBar!: HTMLDivElement;
   private transcriptExpandBtn!: HTMLButtonElement;
@@ -476,6 +485,18 @@ class AiWidget implements monaco.editor.IContentWidget {
   public approveFirstUnresolved() {
     const first = this.hunks.find((h) => !h.resolved);
     if (first) this.approveHunk(first);
+  }
+
+  /** Seed the input without sending, so the user can edit before submitting. */
+  public prefill(text: string) {
+    requestAnimationFrame(() => {
+      if (!this.input) return;
+      this.input.value = text;
+      this.autoGrow();
+      this.sendBtn.disabled = text.trim().length === 0;
+      this.input.focus();
+      this.input.setSelectionRange(text.length, text.length);
+    });
   }
 
   public clearViewZone() {
@@ -611,7 +632,6 @@ class AiWidget implements monaco.editor.IContentWidget {
     }
   }
 
-  // --- per-hunk inline diff (edit mode) -------------------------------------
 
   private applyDiff(state: AiState) {
     const model = this.model();
@@ -820,7 +840,6 @@ class AiWidget implements monaco.editor.IContentWidget {
     this.editor.focus();
   };
 
-  // --- submit / retry --------------------------------------------------------
 
   private async submit() {
     const st = this.field();
@@ -828,9 +847,9 @@ class AiWidget implements monaco.editor.IContentWidget {
     const text = this.input.value.trim();
     if (!text) return;
 
-    if (!isBrainReady()) {
-      this.store.fail("This brain isn't configured yet. Open AI Settings to finish setup.");
-      window.dispatchEvent(new CustomEvent("aether:open-ai-settings"));
+    if (!isTaskReady("inline")) {
+      this.store.fail(taskSetupMessage("inline"));
+      openAiSettings();
       return;
     }
 
@@ -857,14 +876,25 @@ class AiWidget implements monaco.editor.IContentWidget {
     const { system, messages } = buildRequest(model, this.getPath(), st);
 
     try {
-      await runCompletion({
+      await runAgent({
+        task: "inline",
         system,
         messages,
+        root: getWorkspaceRoot(),
+        onStepStart: () => {
+          if (alive()) this.store.resetStreaming();
+        },
         onToken: (text) => {
           if (alive()) this.store.appendStreaming(text);
         },
-        onReplace: (text) => {
-          if (alive()) this.store.replaceStreaming(text);
+        onReasoning: () => {
+          if (alive()) this.store.setActivity("Thinking…");
+        },
+        onToolCall: (call) => {
+          if (alive()) this.store.setActivity(describeToolCall(call.name, call.input));
+        },
+        onToolResult: () => {
+          if (alive()) this.store.setActivity("");
         },
       });
       if (alive()) this.store.finishTurn();
@@ -873,7 +903,6 @@ class AiWidget implements monaco.editor.IContentWidget {
     }
   }
 
-  // --- DOM -------------------------------------------------------------------
 
   private build(state: AiState) {
     this.root.replaceChildren();
@@ -923,33 +952,6 @@ class AiWidget implements monaco.editor.IContentWidget {
       this.sendBtn.disabled = this.input.value.trim().length === 0;
     });
 
-    // Effort selector (placed inside inputRow, bottom-left)
-    this.effortTrigger = document.createElement("button");
-    this.effortTrigger.type = "button";
-    this.effortTrigger.className = "aether-ai-effort-trigger";
-    this.effortTrigger.title = "Reasoning effort";
-
-    this.effortIcon = document.createElement("span");
-    this.effortIcon.className = "aether-ai-effort-icon";
-
-    this.effortLabel = document.createElement("span");
-    this.effortLabel.className = "aether-ai-effort-label";
-
-    const effortChevron = document.createElement("span");
-    effortChevron.className = "aether-ai-effort-chevron";
-    effortChevron.textContent = "⌄";
-
-    this.effortTrigger.append(this.effortIcon, this.effortLabel, effortChevron);
-    this.effortTrigger.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleEffortMenu();
-    });
-
-    this.effortMenu = document.createElement("div");
-    this.effortMenu.className = "aether-ai-effort-menu";
-    this.effortMenu.hidden = true;
-    this.renderEffortOptions();
-
     this.modeDropdownBtn = document.createElement("button");
     this.modeDropdownBtn.className = "aether-ai-mode-dropdown";
     this.modeDropdownBtn.type = "button";
@@ -976,7 +978,7 @@ class AiWidget implements monaco.editor.IContentWidget {
       }
     });
 
-    inputRow.append(this.input, this.effortTrigger, this.effortMenu, this.modeDropdownBtn, this.modeMenu, this.sendBtn);
+    inputRow.append(this.input, this.modeDropdownBtn, this.modeMenu, this.sendBtn);
 
     this.footer = document.createElement("div");
     this.footer.className = "aether-ai-footer";
@@ -1006,6 +1008,11 @@ class AiWidget implements monaco.editor.IContentWidget {
   private closeMenu() {
     this.modeMenu.hidden = true;
     document.removeEventListener("mousedown", this.outsideClickHandler, true);
+  }
+
+  /** Redraw the dropdown in place, keeping it open. */
+  refreshMenu() {
+    if (this.modeMenu && !this.modeMenu.hidden) this.renderMenu();
   }
 
   private renderMenu() {
@@ -1045,6 +1052,13 @@ class AiWidget implements monaco.editor.IContentWidget {
       return d;
     };
 
+    const heading = (text: string) => {
+      const el = document.createElement("div");
+      el.className = "aether-ai-mode-menu-heading";
+      el.textContent = text;
+      return el;
+    };
+
     const settingsBtn = document.createElement("button");
     settingsBtn.type = "button";
     settingsBtn.className = "aether-ai-mode-menu-item";
@@ -1052,7 +1066,7 @@ class AiWidget implements monaco.editor.IContentWidget {
     settingsLabel.textContent = "⚙ AI Settings";
     settingsBtn.appendChild(settingsLabel);
     settingsBtn.addEventListener("click", () => {
-      window.dispatchEvent(new CustomEvent("aether:open-ai-settings"));
+      openAiSettings();
       this.closeMenu();
     });
 
@@ -1060,68 +1074,83 @@ class AiWidget implements monaco.editor.IContentWidget {
       modeRow("Edit Selection", "edit", "↵"),
       modeRow("Quick Question", "question", "Alt+↵"),
       divider(),
+      heading("Model"),
+      this.routingRow(),
+      heading("Reasoning effort"),
+      this.effortRow(),
+      divider(),
       settingsBtn,
     );
   }
 
-  private toggleEffortMenu() {
-    if (this.effortMenu.hidden) {
-      this.effortMenu.hidden = false;
-      document.addEventListener("mousedown", this.outsideEffortClick, true);
-    } else {
-      this.closeEffortMenu();
+  /** Provider + model picker bound to the `inline` task, so routing is changeable
+   *  from the prompt bar rather than only in Settings. */
+  private routingRow(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "aether-ai-mode-menu-control";
+
+    const config = getAiConfig();
+    const assignment = config.assignments.inline;
+    const resolved = resolveTask("inline", config);
+
+    const providerSelect = document.createElement("select");
+    providerSelect.className = "aether-ai-select";
+    for (const provider of config.providers) {
+      const option = document.createElement("option");
+      option.value = provider.id;
+      option.textContent = provider.enabled ? provider.label : `${provider.label} (off)`;
+      providerSelect.appendChild(option);
     }
+    providerSelect.value = resolved?.provider.id ?? assignment.providerId;
+    providerSelect.addEventListener("change", () => {
+      updateAssignment("inline", { inherit: false, providerId: providerSelect.value, model: "" });
+    });
+
+    const modelSelect = document.createElement("select");
+    modelSelect.className = "aether-ai-select";
+    const provider = config.providers.find((p) => p.id === providerSelect.value);
+    const models = provider ? modelsFor(provider) : [];
+    if (models.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No models configured";
+      modelSelect.appendChild(option);
+      modelSelect.disabled = true;
+    }
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.label;
+      modelSelect.appendChild(option);
+    }
+    modelSelect.value = resolved?.model ?? assignment.model;
+    modelSelect.addEventListener("change", () => {
+      updateAssignment("inline", { inherit: false, model: modelSelect.value });
+    });
+
+    row.append(providerSelect, modelSelect);
+    return row;
   }
 
-  private closeEffortMenu() {
-    this.effortMenu.hidden = true;
-    document.removeEventListener("mousedown", this.outsideEffortClick, true);
-  }
+  private effortRow(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "aether-ai-mode-menu-control";
 
-  private outsideEffortClick = (e: MouseEvent) => {
-    if (!this.effortMenu.contains(e.target as Node) && e.target !== this.effortTrigger) {
-      this.closeEffortMenu();
-    }
-  };
+    const current = resolveTask("inline")?.effort ?? getAiConfig().assignments.inline.effort;
+    const efforts: Effort[] = ["off", "low", "medium", "high"];
 
-  private renderEffortOptions() {
-    const current = getAiSettings().reasoningEffort;
-    this.effortMenu.replaceChildren();
-
-    const updateIcon = (id: string) => {
-      this.effortIcon.innerHTML = EFFORT_SVGS[id] || "";
-      this.effortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === id)?.label || id;
-    };
-
-    for (const level of EFFORT_LEVELS) {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "aether-ai-effort-item";
-      if (level.id === current) item.classList.add("active");
-
-      const icon = document.createElement("span");
-      icon.className = "aether-ai-effort-item-icon";
-      icon.innerHTML = EFFORT_SVGS[level.id] || "";
-
-      const label = document.createElement("span");
-      label.className = "aether-ai-effort-item-label";
-      label.textContent = level.label;
-
-      item.append(icon, label);
-      item.addEventListener("click", () => {
-        setAiSetting("reasoningEffort", level.id);
-        this.closeEffortMenu();
-        updateIcon(level.id);
+    for (const effort of efforts) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `aether-ai-chip${effort === current ? " active" : ""}`;
+      btn.textContent = effort === "off" ? "Off" : effort[0].toUpperCase() + effort.slice(1);
+      btn.addEventListener("click", () => {
+        updateAssignment("inline", { inherit: false, effort });
       });
-      this.effortMenu.appendChild(item);
+      row.appendChild(btn);
     }
 
-    updateIcon(current);
-  }
-
-  public refreshEffort() {
-    if (this.builtForGen < 0 || !this.effortTrigger) return;
-    this.renderEffortOptions();
+    return row;
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -1254,7 +1283,6 @@ class AiWidget implements monaco.editor.IContentWidget {
       this.sendBtn.title = "Send (Enter)";
     }
 
-    // --- diff bar (top of widget) ---
     if (state.mode === "edit" && this.diffActive) {
       const unresolved = this.hunks.filter((h) => !h.resolved).length;
       this.diffBar.hidden = false;
@@ -1281,7 +1309,6 @@ class AiWidget implements monaco.editor.IContentWidget {
     }
 
     this.footer.replaceChildren();
-    this.effortTrigger.disabled = state.status === "streaming";
 
     if (state.status === "error") {
       this.footer.append(
@@ -1291,7 +1318,7 @@ class AiWidget implements monaco.editor.IContentWidget {
         this.actionButton("Close  Esc", "primary", this.close),
       );
     } else if (state.status === "streaming") {
-      this.footer.append(hint("Generating…  Esc to dismiss"));
+      this.footer.append(hint(state.activity ? `${state.activity}…` : "Generating…  Esc to dismiss"));
     } else if (state.mode === "edit" && this.noChanges && state.turns.length > 0) {
       this.footer.append(hint("No changes proposed"));
     }
@@ -1504,12 +1531,59 @@ function ensureStyleInjected() {
   z-index: 1000 !important;
   display: flex;
   flex-direction: column;
-  min-width: 170px;
+  min-width: 240px;
   padding: 4px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #09090b;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.aether-ai-mode-menu-heading {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #52525b;
+}
+.aether-ai-mode-menu-control {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px 6px;
+}
+.aether-ai-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #e4e4e7;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none !important;
+}
+.aether-ai-select:disabled { opacity: 0.45; cursor: default; }
+.aether-ai-select option { background: #18181b; color: #e4e4e7; }
+.aether-ai-chip {
+  flex: 1;
+  padding: 4px 0;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  outline: none !important;
+}
+.aether-ai-chip:hover { background: rgba(255, 255, 255, 0.05); color: #ffffff; }
+.aether-ai-chip.active {
+  border-color: rgba(var(--aether-accent-rgb, 120 180 255), 0.5);
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
 }
 .aether-ai-mode-menu-item {
   display: flex;
@@ -1747,102 +1821,6 @@ function ensureStyleInjected() {
 }
 
 
-/* ── Effort selector ─────────────────────────────────────────────── */
-.aether-ai-effort-trigger {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px 0 5px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: #a1a1aa;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-  outline: none !important;
-  box-shadow: none !important;
-  font-family: inherit;
-  font-size: 11.5px;
-}
-.aether-ai-effort-trigger:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #e4e4e7;
-}
-.aether-ai-effort-trigger:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.aether-ai-effort-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: inherit;
-  line-height: 0;
-}
-.aether-ai-effort-label {
-  font-weight: 500;
-  color: inherit;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.aether-ai-effort-chevron {
-  font-size: 10px;
-  opacity: 0.7;
-  pointer-events: none;
-}
-.aether-ai-effort-menu {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 6px);
-  z-index: 1000 !important;
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  padding: 4px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #09090b;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-}
-.aether-ai-effort-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: #a1a1aa;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  outline: none !important;
-  font-family: inherit;
-}
-.aether-ai-effort-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
-}
-.aether-ai-effort-item.active {
-  color: #c4c9ff;
-}
-.aether-ai-effort-item-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  opacity: 0.7;
-}
-.aether-ai-effort-item.active .aether-ai-effort-item-icon {
-  opacity: 1;
-}
-
 /* ── Question mode separator ────────────────────────────────────── */
 .aether-ai-separator {
   height: 1px;
@@ -1859,7 +1837,10 @@ function ensureStyleInjected() {
  * `getPath` is read at request time (not captured once), since the editor
  * instance is persistent and outlives many file switches.
  */
-export function installAiEdit(editor: monaco.editor.IStandaloneCodeEditor, getPath: () => string): void {
+export function installAiEdit(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  getPath: () => string,
+): { openEditAtLine: (line: number, instruction: string) => void } {
   ensureStyleInjected();
 
   const store = new AiStore();
@@ -1897,6 +1878,12 @@ export function installAiEdit(editor: monaco.editor.IStandaloneCodeEditor, getPa
     }
     if (state) widget.onStateChange(state);
     updatePopover();
+  });
+
+  // Routing chosen from the prompt-bar menu lands in the AI config store, so the
+  // open menu has to redraw from there rather than from widget state.
+  subscribeAiConfig(() => {
+    if (store.get()) widget.refreshMenu();
   });
 
   editor.addAction({
@@ -1939,12 +1926,20 @@ export function installAiEdit(editor: monaco.editor.IStandaloneCodeEditor, getPa
     updatePopover();
   });
 
-  // Keep the effort selector in sync with the AI Settings dialog.
-  subscribeAiSettings(() => widget.refreshEffort());
-
-  // Dev-only: lets the browser preview simulate a completed assistant turn to
-  // exercise the hunk UI without a Tauri backend.
-  if (import.meta.env.DEV) {
-    (window as unknown as Record<string, unknown>).__aetherAiDebug = { store, widget };
-  }
+  return {
+    /** Opens the prompt bar on `line`, prefilled with a fix instruction. */
+    openEditAtLine(line: number, instruction: string) {
+      const model = editor.getModel();
+      if (!model) return;
+      const target = Math.min(Math.max(line, 1), model.getLineCount());
+      const from = model.getOffsetAt({ lineNumber: target, column: 1 });
+      const to = model.getOffsetAt({
+        lineNumber: target,
+        column: model.getLineMaxColumn(target),
+      });
+      editor.revealLineInCenter(target);
+      store.open("edit", from, to, model.getValueInRange(new monaco.Range(target, 1, target, model.getLineMaxColumn(target))));
+      widget.prefill(instruction);
+    },
+  };
 }

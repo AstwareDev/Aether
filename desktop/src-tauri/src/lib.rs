@@ -540,6 +540,26 @@ async fn git_diff(root: String, file_path: String) -> Result<String, String> {
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// Whole staged changeset in one call, so commit-message generation sees every
+/// file together instead of stitching per-file diffs.
+#[tauri::command]
+async fn git_diff_staged(root: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = create_command("git")
+            .args(["diff", "--cached"])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn git_stage_all(root: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -617,6 +637,44 @@ async fn git_checkout_file(root: String, file_path: String) -> Result<(), String
 }
 
 #[tauri::command]
+async fn git_push(root: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = create_command("git")
+            .args(["push"])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn git_push_set_upstream(root: String, branch: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = create_command("git")
+            .args(["push", "--set-upstream", "origin", &branch])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+#[tauri::command]
 async fn git_show(root: String, file_path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let output = create_command("git")
@@ -640,23 +698,22 @@ struct GitCommit {
     hash: String,
     short_hash: String,
     author: String,
+    author_email: String,
     date: String,
     message: String,
     refs: String,
+    parents: Vec<String>,
 }
 
+// Unit separator keeps `|` inside subjects and ref names from corrupting the split.
+const LOG_FORMAT: &str = "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%P%x1f%D%x1f%s";
+
 #[tauri::command]
-async fn git_log(root: String) -> Result<Vec<GitCommit>, String> {
+async fn git_log(root: String, limit: Option<u32>) -> Result<Vec<GitCommit>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let max_count = format!("--max-count={}", limit.unwrap_or(200).clamp(1, 5000));
         let output = create_command("git")
-            .args([
-                "log",
-                "--max-count=50",
-                "--all",
-                "--oneline",
-                "--decorate",
-                "--format=%H|%h|%an|%aI|%s|%D",
-            ])
+            .args(["log", &max_count, "--all", "--topo-order", LOG_FORMAT])
             .current_dir(&root)
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
@@ -668,17 +725,22 @@ async fn git_log(root: String) -> Result<Vec<GitCommit>, String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut commits = Vec::new();
         for line in stdout.lines() {
-            let parts: Vec<&str> = line.splitn(6, '|').collect();
-            if parts.len() < 6 {
+            let parts: Vec<&str> = line.split('\u{1f}').collect();
+            if parts.len() < 8 {
                 continue;
             }
             commits.push(GitCommit {
                 hash: parts[0].to_string(),
                 short_hash: parts[1].to_string(),
                 author: parts[2].to_string(),
-                date: parts[3].to_string(),
-                message: parts[4].to_string(),
-                refs: parts[5].to_string(),
+                author_email: parts[3].to_string(),
+                date: parts[4].to_string(),
+                parents: parts[5]
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect(),
+                refs: parts[6].to_string(),
+                message: parts[7].to_string(),
             });
         }
         Ok(commits)
@@ -688,25 +750,18 @@ async fn git_log(root: String) -> Result<Vec<GitCommit>, String> {
 }
 
 #[tauri::command]
-async fn git_log_graph(root: String) -> Result<String, String> {
+async fn git_remote_url(root: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let output = create_command("git")
-            .args([
-                "log",
-                "--max-count=50",
-                "--all",
-                "--oneline",
-                "--graph",
-                "--decorate",
-            ])
+            .args(["config", "--get", "remote.origin.url"])
             .current_dir(&root)
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
 
         if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            return Err("No remote origin found".to_string());
         }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     })
     .await
     .map_err(|e| format!("task failed: {e}"))?
@@ -814,6 +869,223 @@ fn open_in_terminal(dir: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct ToolExecResult {
+    output: String,
+    error: Option<String>,
+}
+
+/// Resolves an agent-supplied path against the workspace root and rejects
+/// anything that escapes it, so a hallucinated `../../` cannot reach outside
+/// the project. Canonicalized where possible because `..` segments only
+/// resolve correctly against a real filesystem.
+fn resolve_in_root(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
+    let root_path = Path::new(root);
+    let root_canon = root_path
+        .canonicalize()
+        .unwrap_or_else(|_| root_path.to_path_buf());
+
+    let candidate = Path::new(rel);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root_canon.join(candidate)
+    };
+
+    let resolved = joined.canonicalize().unwrap_or(joined);
+    if !resolved.starts_with(&root_canon) {
+        return Err(format!("path escapes the workspace: {rel}"));
+    }
+    Ok(resolved)
+}
+
+const MAX_TOOL_OUTPUT: usize = 24_000;
+const MAX_SEARCH_MATCHES: usize = 60;
+
+fn truncate_output(text: String, note: &str) -> String {
+    match text.char_indices().nth(MAX_TOOL_OUTPUT) {
+        Some((idx, _)) => format!("{}\n… output truncated ({note})", &text[..idx]),
+        None => text,
+    }
+}
+
+/// Filename glob supporting `*` and `?`. Full-path globbing is unnecessary —
+/// callers scope the walk with `path` instead.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    fn inner(p: &[u8], n: &[u8]) -> bool {
+        match p.first() {
+            None => n.is_empty(),
+            Some(b'*') => inner(&p[1..], n) || (!n.is_empty() && inner(p, &n[1..])),
+            Some(b'?') => !n.is_empty() && inner(&p[1..], &n[1..]),
+            Some(c) => !n.is_empty() && n[0].eq_ignore_ascii_case(c) && inner(&p[1..], &n[1..]),
+        }
+    }
+    inner(pattern.as_bytes(), name.as_bytes())
+}
+
+fn walk_workspace(root: &std::path::Path) -> ignore::Walk {
+    WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .filter_entry(|e| e.file_name() != ".git" && e.file_name() != "node_modules")
+        .build()
+}
+
+fn rel_display(path: &std::path::Path, base: &std::path::Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+#[tauri::command]
+async fn exec_tool(
+    name: String,
+    input: serde_json::Value,
+    root: String,
+) -> Result<ToolExecResult, String> {
+    tauri::async_runtime::spawn_blocking(move || exec_tool_blocking(&name, &input, &root))
+        .await
+        .map_err(|e| format!("task failed: {e}"))?
+}
+
+fn exec_tool_blocking(
+    name: &str,
+    input: &serde_json::Value,
+    root: &str,
+) -> Result<ToolExecResult, String> {
+    let str_arg = |key: &str| input.get(key).and_then(|v| v.as_str());
+    let usize_arg = |key: &str| input.get(key).and_then(|v| v.as_u64()).map(|n| n as usize);
+    let ok = |output: String| {
+        Ok(ToolExecResult {
+            output,
+            error: None,
+        })
+    };
+
+    match name {
+        "read_file" => {
+            let rel = str_arg("path").ok_or("missing path")?;
+            let path = resolve_in_root(root, rel)?;
+            let content =
+                std::fs::read_to_string(&path).map_err(|e| format!("failed to read {rel}: {e}"))?;
+
+            let lines: Vec<&str> = content.lines().collect();
+            let start = usize_arg("start_line").unwrap_or(1).max(1) - 1;
+            let end = usize_arg("end_line").unwrap_or(lines.len()).min(lines.len());
+            if start >= lines.len() {
+                return Ok(ToolExecResult {
+                    output: String::new(),
+                    error: Some(format!(
+                        "start_line {} is past end of file ({} lines)",
+                        start + 1,
+                        lines.len()
+                    )),
+                });
+            }
+
+            let numbered = lines[start..end]
+                .iter()
+                .enumerate()
+                .map(|(i, l)| format!("{}: {}", start + i + 1, l))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            ok(truncate_output(numbered, "narrow the line range"))
+        }
+        "list_directory" => {
+            let rel = str_arg("path").unwrap_or(".");
+            let dir = resolve_in_root(root, rel)?;
+            let entries =
+                std::fs::read_dir(&dir).map_err(|e| format!("failed to list {rel}: {e}"))?;
+
+            let mut items: Vec<String> = entries
+                .flatten()
+                .filter(|e| e.file_name() != ".git" && e.file_name() != "node_modules")
+                .take(400)
+                .map(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        format!("{name}/")
+                    } else {
+                        name
+                    }
+                })
+                .collect();
+            items.sort();
+
+            ok(items.join("\n"))
+        }
+        "search_code" => {
+            let query = str_arg("query").ok_or("missing query")?;
+            let re = regex::RegexBuilder::new(query)
+                .case_insensitive(
+                    input
+                        .get("ignore_case")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                )
+                .build()
+                .map_err(|e| format!("invalid regex: {e}"))?;
+
+            let search_root = resolve_in_root(root, str_arg("path").unwrap_or("."))?;
+            let glob = str_arg("glob").filter(|g| !g.is_empty());
+
+            let mut matches: Vec<String> = Vec::new();
+            'walk: for entry in walk_workspace(&search_root).flatten() {
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    continue;
+                }
+                let path = entry.path();
+                if let Some(pattern) = glob {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    if !glob_matches(pattern, &name) {
+                        continue;
+                    }
+                }
+                let Ok(text) = std::fs::read_to_string(path) else {
+                    continue;
+                };
+                let rel = rel_display(path, &search_root);
+                for (i, line) in text.lines().enumerate() {
+                    if re.is_match(line) {
+                        matches.push(format!("{}:{}: {}", rel, i + 1, line.trim()));
+                        if matches.len() >= MAX_SEARCH_MATCHES {
+                            break 'walk;
+                        }
+                    }
+                }
+            }
+
+            ok(if matches.is_empty() {
+                "No matches found.".to_string()
+            } else {
+                matches.join("\n")
+            })
+        }
+        "find_files" => {
+            let pattern = str_arg("pattern").ok_or("missing pattern")?;
+            let search_root = resolve_in_root(root, str_arg("path").unwrap_or("."))?;
+
+            let mut found: Vec<String> = walk_workspace(&search_root)
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter(|e| glob_matches(pattern, &e.file_name().to_string_lossy()))
+                .take(200)
+                .map(|e| rel_display(e.path(), &search_root))
+                .collect();
+            found.sort();
+
+            ok(if found.is_empty() {
+                "No files matched.".to_string()
+            } else {
+                found.join("\n")
+            })
+        }
+        other => Err(format!("unknown tool: {other}")),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -837,6 +1109,7 @@ pub fn run() {
             copy_entry,
             ai::ai_complete,
             ai::ai_list_models,
+            exec_tool,
             terminal::pty_spawn,
             terminal::pty_write,
             terminal::pty_resize,
@@ -845,13 +1118,16 @@ pub fn run() {
             open_in_terminal,
             git_status,
             git_diff,
+            git_diff_staged,
             git_show,
             git_log,
-            git_log_graph,
+            git_remote_url,
             git_stage_all,
             git_commit,
             git_branch,
             git_checkout_file,
+            git_push,
+            git_push_set_upstream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

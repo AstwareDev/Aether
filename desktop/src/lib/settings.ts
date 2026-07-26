@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { createStore } from "./store";
 import type { Settings } from "../types";
 
 const DEFAULTS: Settings = {
@@ -7,53 +7,18 @@ const DEFAULTS: Settings = {
   sidebarWidth: 256,
   terminalVisible: false,
   layoutMode: "aether",
+  editorFontFamily: "Consolas, 'Courier New', monospace",
+  editorFontSize: 14,
 };
 
-const STORAGE_KEY = "aether:settings";
+const store = createStore<Settings>({ key: "aether:settings", defaults: DEFAULTS });
 
-function load(): Settings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
-  } catch {
-    return { ...DEFAULTS };
-  }
-}
+export const getSettings = store.get;
+export const setSetting = store.setKey;
+export const useSetting = store.useKey;
 
-let state: Settings = load();
-const listeners = new Set<() => void>();
-
-function emit() {
-  for (const l of listeners) l();
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-export function getSettings(): Settings {
-  return state;
-}
-
-export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]): void {
-  if (state[key] === value) return;
-  state = { ...state, [key]: value };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-  }
-  emit();
-}
-
-export function toggleSetting(key: { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings]): void {
-  setSetting(key, !state[key] as never);
-}
-
-export function useSetting<K extends keyof Settings>(key: K): Settings[K] {
-  return useSyncExternalStore(
-    subscribe,
-    () => state[key],
-    () => DEFAULTS[key],
-  );
+export function toggleSetting(
+  key: { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings],
+): void {
+  setSetting(key, !store.get()[key] as never);
 }

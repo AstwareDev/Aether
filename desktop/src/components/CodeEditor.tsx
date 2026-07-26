@@ -2,15 +2,22 @@ import { useEffect, useRef } from "react";
 import { monaco } from "../lib/monaco/setup";
 import { languageForPath } from "../lib/monaco/editorLanguage";
 import { installAiEdit } from "../lib/monaco/aiEdit";
+import { ReviewAnnotation, ensureReviewStyles } from "../lib/monaco/reviewAnnotation";
 import { toUri, isWorkspaceSourceExtension } from "../lib/monaco/workspaceModels";
-import type { CodeEditorProps } from "../types";
+import { useSetting } from "../lib/settings";
+import type { CodeEditorProps, ReviewIssue } from "../types";
 
 export default function CodeEditor({ path, value, onChange, onSave, onCursor, openPaths }: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const annotationRef = useRef<ReviewAnnotation | null>(null);
+  const pendingAnnotationRef = useRef<(ReviewIssue & { path: string }) | null>(null);
   const modelsRef = useRef(new Map<string, monaco.editor.ITextModel>());
   const viewStatesRef = useRef(new Map<string, monaco.editor.ICodeEditorViewState>());
   const currentPathRef = useRef<string | null>(null);
+
+  const editorFontFamily = useSetting("editorFontFamily");
+  const editorFontSize = useSetting("editorFontSize");
 
   // Keep the latest callbacks without rebuilding the editor on every render.
   const onChangeRef = useRef(onChange);
@@ -29,10 +36,9 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
     const editor = monaco.editor.create(hostRef.current, {
       theme: "aether-dark",
       automaticLayout: true,
-      fontSize: 13,
-      lineHeight: 21,
-      fontFamily:
-        "'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      fontSize: editorFontSize,
+      lineHeight: Math.round(editorFontSize * 1.6),
+      fontFamily: editorFontFamily,
       wordWrap: "on",
       renderLineHighlight: "all",
       bracketPairColorization: { enabled: true },
@@ -57,9 +63,46 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
       onCursorRef.current?.({ line: e.position.lineNumber, col: e.position.column });
     });
 
-    installAiEdit(editor, () => pathRef.current);
+    const aiEdit = installAiEdit(editor, () => pathRef.current);
+
+    ensureReviewStyles();
+    const annotation = new ReviewAnnotation(editor, {
+      onFix: (issue) => {
+        annotation.clear();
+        aiEdit.openEditAtLine(
+          issue.line,
+          `${issue.title}. ${issue.description}${issue.suggested_fix ? ` Suggested fix: ${issue.suggested_fix}` : ""}`,
+        );
+      },
+      onDismiss: (issue) => {
+        annotation.clear();
+        window.dispatchEvent(new CustomEvent("aether:dismiss-review-issue", { detail: issue }));
+      },
+      onVote: (issue, vote) => {
+        window.dispatchEvent(new CustomEvent("aether:vote-review-issue", { detail: { issue, vote } }));
+      },
+    });
+    annotationRef.current = annotation;
+
+    // The file may still be mid-swap when the event arrives (Workspace opens
+    // the file, then asks for the card), so hold it until the model matches.
+    const showAnnotation = (e: Event) => {
+      const detail = (e as CustomEvent).detail as (ReviewIssue & { path: string }) | undefined;
+      if (!detail) return;
+      if (detail.path !== pathRef.current) {
+        pendingAnnotationRef.current = detail;
+        return;
+      }
+      pendingAnnotationRef.current = null;
+      annotation.show(detail);
+      editor.focus();
+    };
+    window.addEventListener("aether:show-review-annotation", showAnnotation);
 
     return () => {
+      window.removeEventListener("aether:show-review-annotation", showAnnotation);
+      annotation.clear();
+      annotationRef.current = null;
       editor.dispose();
       editorRef.current = null;
       for (const model of modelsRef.current.values()) model.dispose();
@@ -67,7 +110,7 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
       viewStatesRef.current.clear();
       currentPathRef.current = null;
     };
-  }, []);
+  }, [editorFontFamily, editorFontSize]);
 
   // Swap in the model for the current file when `path` changes.
   useEffect(() => {
@@ -78,6 +121,8 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
     if (prevPath && prevPath !== path) {
       const prevModel = modelsRef.current.get(prevPath);
       if (prevModel) viewStatesRef.current.set(prevPath, editor.saveViewState()!);
+      // The card is anchored to a line in the outgoing file.
+      annotationRef.current?.clear();
     }
 
     let model = modelsRef.current.get(path);
@@ -95,6 +140,12 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
 
     const pos = editor.getPosition();
     if (pos) onCursorRef.current?.({ line: pos.lineNumber, col: pos.column });
+
+    const pending = pendingAnnotationRef.current;
+    if (pending && pending.path === path) {
+      pendingAnnotationRef.current = null;
+      annotationRef.current?.show(pending);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 

@@ -80,3 +80,16 @@ export async function revealInExplorer(path: string): Promise<void> {
 export async function openInTerminal(dir: string): Promise<void> {
   return invoke("open_in_terminal", { dir });
 }
+
+export interface ToolExecResult {
+  output: string;
+  error?: string;
+}
+
+export async function execTool(
+  name: string,
+  input: Record<string, unknown>,
+  root: string,
+): Promise<ToolExecResult> {
+  return invoke<ToolExecResult>("exec_tool", { name, input, root });
+}

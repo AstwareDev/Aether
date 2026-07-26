@@ -44,22 +44,128 @@ export interface AetherManifest {
   folderNamesExpanded: Record<string, string>;
 }
 
-// ── lib/ai.ts ─────────────────────────────────────────────────────────
-export type Brain = "claude" | "lm-studio" | "mercury";
+// ── lib/ai ────────────────────────────────────────────────────────────
+export type Wire = "anthropic" | "openai";
 
-export interface AiSettings {
-  brain: Brain;
-  claudeModel: string;
-  apiKey: string;
-  lmStudioBaseUrl: string;
-  lmStudioModel: string;
-  maxTokens: number;
-  reasoningEffort: string;
+export type Effort = "off" | "low" | "medium" | "high";
+
+export interface ModelInfo {
+  id: string;
+  label: string;
 }
+
+export interface ProviderTemplate {
+  id: string;
+  label: string;
+  description: string;
+  wire: Wire;
+  defaultBaseUrl: string;
+  requiresApiKey: boolean;
+  supportsModelListing: boolean;
+  keyPlaceholder: string;
+  catalog: ModelInfo[];
+}
+
+export interface ProviderConfig {
+  id: string;
+  templateId: string | null;
+  label: string;
+  wire: Wire;
+  baseUrl: string;
+  apiKey: string;
+  models: string[];
+  enabled: boolean;
+}
+
+export type TaskId = "default" | "inline" | "commit" | "review" | "chat";
+
+export interface TaskAssignment {
+  inherit: boolean;
+  providerId: string;
+  model: string;
+  effort: Effort;
+  maxTokens: number;
+}
+
+export interface ResolvedTask {
+  provider: ProviderConfig;
+  model: string;
+  effort: Effort;
+  maxTokens: number;
+}
+
+export interface AiConfig {
+  providers: ProviderConfig[];
+  assignments: Record<TaskId, TaskAssignment>;
+  disabledTools: string[];
+  maxAgentSteps: number;
+  relatedFileBudget: number;
+}
+
+export interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+export interface ThinkingBlock {
+  type: "thinking";
+  thinking: string;
+  signature: string;
+}
+
+export interface RedactedThinkingBlock {
+  type: "redacted_thinking";
+  data: string;
+}
+
+export interface ToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+}
+
+export type ReasoningBlock = ThinkingBlock | RedactedThinkingBlock;
+
+export type ContentBlock = TextBlock | ReasoningBlock | ToolUseBlock | ToolResultBlock;
 
 export interface ChatMessage {
   role: "user" | "assistant";
+  content: string | ContentBlock[];
+}
+
+export type AiEvent =
+  | { type: "delta"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "thinking_block"; thinking: string; signature: string }
+  | { type: "redacted_thinking_block"; data: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  tool_use_id: string;
   content: string;
+  is_error?: boolean;
 }
 
 export interface AiMessage {
@@ -67,17 +173,14 @@ export interface AiMessage {
   content: string;
 }
 
-export type AiEvent =
-  | { type: "delta"; text: string }
-  | { type: "replace"; text: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
 export interface CompletionOptions {
   system: string;
   messages: ChatMessage[];
   onToken: (text: string) => void;
-  onReplace?: (text: string) => void;
+  task?: TaskId;
+  model?: string;
+  maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 // ── lib/settings.ts ───────────────────────────────────────────────────
@@ -87,6 +190,8 @@ export interface Settings {
   sidebarWidth: number;
   terminalVisible: boolean;
   layoutMode: string;
+  editorFontFamily: string;
+  editorFontSize: number;
 }
 
 // ── lib/fs.ts ─────────────────────────────────────────────────────────
@@ -128,7 +233,6 @@ export interface PtyCallbacks {
   onExit: (code: number) => void;
 }
 
-export type ReasoningEffort = "instant" | "low" | "medium" | "high";
 
 // ── lib/monaco/lineDiff.ts ────────────────────────────────────────────
 export interface DiffHunk {
@@ -159,6 +263,8 @@ export interface AiState {
   status: Status;
   turns: Turn[];
   streamingText: string;
+  /** Short label for the tool the agent is currently running, if any. */
+  activity: string;
   error: string;
 }
 
@@ -268,6 +374,18 @@ export interface GitFile {
   status: string;
 }
 
+export type ReviewSeverity = "bug" | "security" | "performance" | "improvement";
+
+export interface ReviewIssue {
+  id: string;
+  file: string;
+  line: number;
+  title: string;
+  description: string;
+  severity: ReviewSeverity;
+  suggested_fix?: string;
+}
+
 export interface SourceControlProps {
   rootPath: string;
   onOpenDiff?: (filePath: string) => void;
@@ -324,7 +442,6 @@ export interface CommitHistoryProps {
 // ── components/SettingsPanel.tsx ───────────────────────────────────────
 export interface SettingsPanelProps {
   section: SettingsSection;
-  onSectionChange?: (section: SettingsSection) => void;
 }
 
 export type SettingsSection = "appearance" | "models" | "ai-tools" | "ai-config";
@@ -420,8 +537,3 @@ export interface FileBuffer {
   error?: string;
 }
 
-// ── components/AiSettings.tsx ─────────────────────────────────────────
-export interface AiSettingsProps {
-  open: boolean;
-  onClose: () => void;
-}

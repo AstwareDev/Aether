@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local secrets (Omniroute key etc). .env.example is committed instead.
+.env
+.env.local
+.env.*.local
+
 # Flow Deep icon SVGs (heavy). The small src/generated/flowManifest.json
 # is committed instead.
 public/icons/flow/

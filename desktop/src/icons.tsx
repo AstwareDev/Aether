@@ -163,7 +163,7 @@ export function QuestionSvg() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Settings section icon (SettingsDialog.tsx)
+// Settings section icon (SettingsPanel.tsx)
 // ─────────────────────────────────────────────────────────────────────
 
 import type { SettingsSection } from "./types";
@@ -307,50 +307,6 @@ export function ShellIcon({ shell, size = 14 }: { shell: TerminalShellKind; size
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Commit graph icons (CommitHistory.tsx)
-// ─────────────────────────────────────────────────────────────────────
-
-export function CommitDot() {
-  return (
-    <svg width="6" height="6" viewBox="0 0 6 6" fill="currentColor">
-      <circle cx="3" cy="3" r="2.5" />
-    </svg>
-  );
-}
-
-export function CommitVertical() {
-  return (
-    <svg width="2" height="20" viewBox="0 0 2 20" fill="currentColor" className="opacity-60">
-      <rect width="2" height="20" rx="1" />
-    </svg>
-  );
-}
-
-export function CommitDiagRight() {
-  return (
-    <svg width="10" height="20" viewBox="0 0 10 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="opacity-60">
-      <path d="M10 20L0 0" />
-    </svg>
-  );
-}
-
-export function CommitDiagLeft() {
-  return (
-    <svg width="10" height="20" viewBox="0 0 10 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="opacity-60">
-      <path d="M0 20L10 0" />
-    </svg>
-  );
-}
-
-export function CommitDash() {
-  return (
-    <svg width="10" height="2" viewBox="0 0 10 2" fill="currentColor" className="opacity-60">
-      <rect width="10" height="2" rx="1" />
-    </svg>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────
 // UI icons extracted from lib/icons/ui.tsx
 // ─────────────────────────────────────────────────────────────────────
 
@@ -387,7 +343,7 @@ export function CheckGlyph({ size = 12 }: { size?: number }) {
 // Used as innerHTML on brain selector elements.
 // ─────────────────────────────────────────────────────────────────────
 
-export const MERCURY_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a0a7ff" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M3.6 9h16.8M3.6 15h16.8"></path></svg>`;
+export const OMNIROUTE_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a0a7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>`;
 
 export const ANTHROPIC_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-16h8l4 20M6 14h12"></path></svg>`;
 

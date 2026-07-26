@@ -1,12 +1,14 @@
 {
   "name": "aether",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "build:check": "node scripts/build-check.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
