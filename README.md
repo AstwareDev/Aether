@@ -1,51 +1,62 @@
 # Aether
 
-> A lightweight code editor built from scratch — aiming for the parts of Cursor an average developer actually uses, without the bloat.
+> A lightweight code editor built from scratch — the parts of Cursor / VS Code an average developer actually uses, without the bloat.
 
 ## What is Aether?
 
-Aether is a desktop code editor built with **Tauri**, currently sitting at roughly **7 MB** — a fraction of the size of Electron-based editors. The goal isn't to replicate every feature of Cursor or VS Code, but to ship a fast, lightweight editor with the subset of features most developers reach for day to day.
+Aether is a desktop code editor built with **Tauri**, currently around **7 MB** — a fraction of the size of Electron-based editors, since it uses the OS's native webview instead of shipping a full Chromium + Node runtime with every install.
 
-Currently mid-migration from JavaScript to **TypeScript**.
+The goal isn't to match every feature of a full-featured IDE. It's to scope down to what developers reach for on a daily basis and make that fast and lightweight.
 
-## Status: Early / Work in Progress
+Also notable: this is the first project built in **TypeScript** from the start, rather than JavaScript.
 
-This is an active, early-stage build — not yet feature-complete or packaged for general use. Right now:
+## Features (working today)
 
-- [ ] TypeScript migration — *in progress*
-- [ ] Core editing experience
-- [ ] *(fill in what's actually working today, e.g. file tree, syntax highlighting, tabs)*
-- [ ] Packaged builds / installer
+- **File explorer & workspace view** — sidebar tree with folder/file navigation
+- **Command palette** — `Ctrl+P` go to file, `Ctrl+Shift+P` show all commands, `Ctrl+B` toggle sidebar, `Ctrl+S` save
+- **Markdown preview** — live rendered preview alongside raw markdown editing
+- **Diagram editing** — draw.io fully embedded in-editor for `.drawio` files (shapes, styles, full toolbar)
+- **Source control** — git changes view with diff status indicators, commit message + commit button, history tab, and an "Agent Review" tab
+- **Workspace search** — full-text search across files with regex, case-sensitivity, filters, and find/replace
+- **AI-assisted editing** — Cursor-style inline AI: `Ctrl+K` quick edit / add to chat, an "Edit Selection" flow with model picker, `Alt+Enter` quick question, and dedicated AI settings
 
-*(Replace the checklist above with your real progress — even 2-3 honest "done" items plus a couple "not yet" items reads better than a vague status line.)*
+## Known Limitations
+
+- AI integration is functional but still early — output quality and reliability need more work
+- Limited language support so far — more languages planned
+- No custom file icons yet
+- First-time load speed is slow and needs optimization
+- No extension system yet — matching VS Code/Cursor-style extensions turned out to be a genuinely hard problem, so a lighter-weight alternative approach is being explored instead of a direct clone
+- Source control diff viewer is basic and needs more work
+- Many smaller issues throughout, as expected at this stage
+- Not yet packaged as a distributable build/installer
 
 ## Why Tauri instead of Electron?
 
-Electron ships a full Chromium + Node runtime with every app, which is why editors built on it often run 100MB+. Tauri uses the OS's native webview instead, which is what keeps Aether's footprint small while still using web tech (HTML/CSS/TypeScript) for the UI.
+Electron ships a full Chromium + Node runtime with every app, which is why editors built on it often run 100MB+. Tauri uses the OS's native webview, which is what keeps Aether small while still building the UI with web tech.
 
 ## Tech Stack
 
 - **Tauri** — desktop shell / native bindings
-- **TypeScript** *(migrating from JavaScript)*
-- *(add your frontend framework here if you're using one — React, Svelte, vanilla, etc.)*
-
-## Philosophy
-
-Not every IDE feature earns its place. Aether is scoped deliberately to what an average developer needs day-to-day, rather than trying to match a full-featured editor's surface area feature-for-feature.
+- **TypeScript** — first project built in TS from the start
+- **React** — UI layer
+- **pnpm** — package manager
 
 ## Running Locally
 
 ```bash
-# fill in once you have a stable dev command, e.g.:
+# fill in your actual dev command, e.g.:
 npm install
 npm run tauri dev
 ```
 
 ## Roadmap
 
-- [ ] Finish TypeScript migration
-- [ ] *(add your next 2-3 real milestones)*
-
-## License
-
-*(add a license if you want this reused/forked — MIT is a common default)*
+- [ ] Deepen AI integration
+- [ ] Add support for more languages
+- [ ] File icons
+- [ ] Faster first-time load speed
+- [ ] Figure out an extension system alternative (VS Code/Cursor-style extension compatibility is a hard problem — exploring a different approach)
+- [ ] Improve the source control diff viewer
+- [ ] **Agent Diff Reviewer** — an AI agent that reviews diffs to find and fix issues, likely built on GLM 5
+- [ ] Package a distributable build
