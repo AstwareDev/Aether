@@ -1,5 +1,7 @@
 # Aether
 
+<img src="/aether-refs/preview.png">
+
 > A lightweight code editor built from scratch — the parts of Cursor / VS Code an average developer actually uses, without the bloat.
 
 ## What is Aether?
