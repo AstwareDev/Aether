@@ -1,11 +1,17 @@
 import { useEffect, useRef } from "react";
 import { monaco } from "../lib/monaco/setup";
 import { languageForPath } from "../lib/monaco/editorLanguage";
+import { useSetting } from "../lib/settings";
 import type { MonacoDiffEditorProps } from "../types";
 
 export default function MonacoDiffEditor({ original, modified, filePath }: MonacoDiffEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+
+  const fontFamily = useSetting("editorFontFamily");
+  const fontSize = useSetting("editorFontSize");
+  const fontRef = useRef({ fontFamily, fontSize });
+  fontRef.current = { fontFamily, fontSize };
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -17,10 +23,9 @@ export default function MonacoDiffEditor({ original, modified, filePath }: Monac
     const editor = monaco.editor.createDiffEditor(hostRef.current, {
       theme: "aether-dark",
       automaticLayout: true,
-      fontSize: 13,
-      lineHeight: 21,
-      fontFamily:
-        "'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      fontFamily: fontRef.current.fontFamily,
+      fontSize: fontRef.current.fontSize,
+      lineHeight: Math.round(fontRef.current.fontSize * 1.6),
       readOnly: true,
       renderSideBySide: false,
       minimap: { enabled: false },
@@ -47,6 +52,15 @@ export default function MonacoDiffEditor({ original, modified, filePath }: Monac
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The diff view shares the editor font so "Editor font" means every code view.
+  useEffect(() => {
+    editorRef.current?.updateOptions({
+      fontFamily,
+      fontSize,
+      lineHeight: Math.round(fontSize * 1.6),
+    });
+  }, [fontFamily, fontSize]);
 
   useEffect(() => {
     const editor = editorRef.current;

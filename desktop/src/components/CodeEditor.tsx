@@ -18,6 +18,9 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
 
   const editorFontFamily = useSetting("editorFontFamily");
   const editorFontSize = useSetting("editorFontSize");
+  const editorWordWrap = useSetting("editorWordWrap");
+  const editorMinimap = useSetting("editorMinimap");
+  const editorLineNumbers = useSetting("editorLineNumbers");
 
   // Keep the latest callbacks without rebuilding the editor on every render.
   const onChangeRef = useRef(onChange);
@@ -29,23 +32,33 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
   onCursorRef.current = onCursor;
   pathRef.current = path;
 
+  const appearance: monaco.editor.IEditorOptions = {
+    fontFamily: editorFontFamily,
+    fontSize: editorFontSize,
+    lineHeight: Math.round(editorFontSize * 1.6),
+    wordWrap: editorWordWrap ? "on" : "off",
+    minimap: { enabled: editorMinimap },
+    lineNumbers: editorLineNumbers,
+  };
+  // The editor is created once; appearance is seeded from a ref so a settings
+  // change never tears down the editor and its models.
+  const appearanceRef = useRef(appearance);
+  appearanceRef.current = appearance;
+
   // Create the persistent editor once.
   useEffect(() => {
     if (!hostRef.current) return;
 
+    const appearance = appearanceRef.current;
     const editor = monaco.editor.create(hostRef.current, {
       theme: "aether-dark",
       automaticLayout: true,
-      fontSize: editorFontSize,
-      lineHeight: Math.round(editorFontSize * 1.6),
-      fontFamily: editorFontFamily,
-      wordWrap: "on",
+      ...appearance,
       renderLineHighlight: "all",
       bracketPairColorization: { enabled: true },
       matchBrackets: "always",
       autoClosingBrackets: "always",
       autoClosingQuotes: "always",
-      minimap: { enabled: false },
       scrollBeyondLastLine: false,
     });
     editorRef.current = editor;
@@ -110,7 +123,15 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
       viewStatesRef.current.clear();
       currentPathRef.current = null;
     };
-  }, [editorFontFamily, editorFontSize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Appearance settings apply in place, so the editor keeps its models,
+  // view state, and any open review annotation.
+  useEffect(() => {
+    editorRef.current?.updateOptions(appearance);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorFontFamily, editorFontSize, editorWordWrap, editorMinimap, editorLineNumbers]);
 
   // Swap in the model for the current file when `path` changes.
   useEffect(() => {

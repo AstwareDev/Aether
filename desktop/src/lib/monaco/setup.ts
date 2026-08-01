@@ -174,41 +174,89 @@ monaco.editor.defineTheme("aether-dark", {
   base: "vs-dark",
   inherit: true,
   rules: [
-    { token: "comment", foreground: "7f848e", fontStyle: "italic" },
-    { token: "keyword", foreground: "c678dd" },
-    { token: "string", foreground: "98c379" },
-    { token: "number", foreground: "d19a66" },
-    { token: "regexp", foreground: "56b6c2" },
-    { token: "type", foreground: "e5c07b" },
-    { token: "class", foreground: "e5c07b" },
-    { token: "interface", foreground: "e5c07b" },
-    { token: "function", foreground: "61afef" },
-    { token: "variable", foreground: "e06c75" },
-    { token: "variable.predefined", foreground: "e06c75" },
-    { token: "variable.parameter", foreground: "e06c75" },
-    { token: "constant", foreground: "d19a66" },
+    // --- Comments & Meta ---
+    { token: "comment", foreground: "5c6370", fontStyle: "italic" },
+    { token: "meta", foreground: "7f848e" },
+
+    // --- Keywords & Control Flow ---
+    { token: "keyword", foreground: "c678dd", fontStyle: "bold" },
+    { token: "keyword.flow", foreground: "c678dd" },
+    { token: "storage", foreground: "c678dd" },
     { token: "operator", foreground: "56b6c2" },
     { token: "delimiter", foreground: "abb2bf" },
+
+    // --- Literals & Constants ---
+    { token: "string", foreground: "98c379" },
+    { token: "string.escape", foreground: "56b6c2" },
+    { token: "number", foreground: "d19a66" },
+    { token: "regexp", foreground: "56b6c2" },
+    { token: "constant", foreground: "d19a66", fontStyle: "bold" },
+
+    // --- Identifiers, Types & Functions ---
+    { token: "type", foreground: "e5c07b" },
+    { token: "class", foreground: "e5c07b", fontStyle: "bold" },
+    { token: "interface", foreground: "e5c07b", fontStyle: "italic" },
+    { token: "function", foreground: "61afef" },
+    { token: "variable", foreground: "e06c75" },
+    { token: "variable.parameter", foreground: "e06c75", fontStyle: "italic" },
     { token: "property", foreground: "e5c07b" },
     { token: "identifier", foreground: "abb2bf" },
-    { token: "type.identifier", foreground: "e5c07b" },
-    { token: "tag", foreground: "e06c75" },
-    { token: "attribute.name", foreground: "d19a66" },
-    { token: "attribute.value", foreground: "98c379" },
-    { token: "meta.tag", foreground: "abb2bf" },
+
+    // --- JSX & TSX Highlighting (Cursor-Style) ---
+    { token: "tag", foreground: "e06c75" },                          // Standard HTML tags (div, span)
+    { token: "tag.identifier", foreground: "e06c75" },               // Tag names
+    { token: "type.identifier.tag", foreground: "e5c07b" },          // React Components (<Header />)
+    { token: "tag.component", foreground: "e5c07b" },                // Component tag scope
+    { token: "attribute.name", foreground: "d19a66" },               // Props (className, onClick)
+    { token: "attribute.value", foreground: "98c379" },              // Prop string values
+    { token: "delimiter.html", foreground: "56b6c2" },               // Angle brackets < >
+    { token: "delimiter.xml", foreground: "56b6c2" },                // Self-closing />
+    { token: "punctuation.definition.tag", foreground: "56b6c2" },   // Tag braces
+
+    // --- Cursor Markdown Syntax Polish ---
+    { token: "keyword.md", foreground: "e06c75", fontStyle: "bold" },       // Markdown Headings (#, ##)
+    { token: "string.md", foreground: "abb2bf" },                         // Normal Markdown body text
+    { token: "variable.md", foreground: "61afef" },                       // Link URLs
+    { token: "string.link.md", foreground: "61afef", fontStyle: "underline" }, // Link Text
+    { token: "strong.md", foreground: "d19a66", fontStyle: "bold" },       // **Bold**
+    { token: "emphasis.md", foreground: "c678dd", fontStyle: "italic" },   // *Italics*
+    { token: "variable.source.md", foreground: "98c379" },                 // Blockquotes
+    { token: "keyword.symbol.md", foreground: "56b6c2" }                   // Inline Code (`code`)
   ],
   colors: {
-    "editor.background": "#0a0a0a",
-    "editorGutter.background": "#0a0a0a",
-    "editorLineNumber.foreground": "#495162",
-    "editorLineNumber.activeForeground": "#abb2bf",
-    "editor.lineHighlightBackground": "#ffffff08",
+    // --- Canvas & Surfaces ---
+    "editor.background": "#0b0d10",
+    "editor.foreground": "#abb2bf",
+    "editorGutter.background": "#0b0d10",
+
+    // --- Line Numbers ---
+    "editorLineNumber.foreground": "#3b4048",
+    "editorLineNumber.activeForeground": "#636d83",
+
+    // --- Active Line & Selection ---
+    "editor.lineHighlightBackground": "#16191f80",
     "editor.lineHighlightBorder": "#00000000",
     "editorCursor.foreground": "#528bff",
-    "editor.selectionBackground": "#3e445180",
-    "editorIndentGuide.background": "#ffffff0c",
-    "editorIndentGuide.activeBackground": "#ffffff24",
-  },
+    "editor.selectionBackground": "#3e445155",
+    "editor.inactiveSelectionBackground": "#3e445133",
+    "editor.selectionHighlightBackground": "#2c313a40",
+    "editor.wordHighlightBackground": "#2c313a60",
+
+    // --- Indent Guides & Whitespace ---
+    "editorIndentGuide.background1": "#ffffff0a",
+    "editorIndentGuide.activeBackground1": "#ffffff20",
+    "editorWhitespace.foreground": "#ffffff10",
+
+    // --- Popups, Autocomplete & Scrollbars ---
+    "editorWidget.background": "#12151a",
+    "editorWidget.border": "#1e222b",
+    "editorSuggestWidget.background": "#12151a",
+    "editorSuggestWidget.border": "#1e222b",
+    "editorSuggestWidget.selectedBackground": "#2c313a80",
+    "scrollbarSlider.background": "#ffffff0d",
+    "scrollbarSlider.hoverBackground": "#ffffff1a",
+    "scrollbarSlider.activeBackground": "#ffffff26"
+  }
 });
 
 monaco.languages.register({ id: "diff" });

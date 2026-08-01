@@ -4,7 +4,7 @@ import ActivityBar from "./ActivityBar";
 import FileTree from "./FileTree";
 import SourceControl from "./SourceControl";
 import Search from "./Search";
-import { useSetting } from "../lib/settings";
+import { SETTINGS_SECTIONS, useSetting } from "../lib/settings";
 import { SectionIcon } from "../icons";
 import {
   NewFileIcon,
@@ -15,13 +15,6 @@ import {
 } from "../lib/icons/ui";
 import type { ComponentType } from "react";
 import type { UIIconProps, SidebarProps, SettingsSection } from "../types";
-
-const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "appearance", label: "Appearance" },
-  { id: "models", label: "Models & Providers" },
-  { id: "ai-tools", label: "AI Tools" },
-  { id: "ai-config", label: "AI Configuration" },
-];
 
 function ToolbarButton({
   label,
@@ -111,26 +104,30 @@ function PanelContent({
           Settings
         </span>
       </div>
-      <div className="scroll-thin flex-1 space-y-1 overflow-y-auto px-2">
-        {SETTINGS_SECTIONS.map(({ id, label }) => {
-          const active = settingsSection === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onSelectSettingsSection?.(id)}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors ${
-                active
-                  ? "bg-white/[0.08] text-white"
-                  : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-              }`}
-            >
-              <SectionIcon section={id} />
-              <span className="truncate">{label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <nav aria-label="Settings sections" className="scroll-thin flex-1 overflow-y-auto px-2">
+        <ul className="space-y-1">
+          {SETTINGS_SECTIONS.map(({ id, label }) => {
+            const active = settingsSection === id;
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => onSelectSettingsSection?.(id)}
+                  className={`focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-white/[0.08] text-white"
+                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  }`}
+                >
+                  <SectionIcon section={id} />
+                  <span className="truncate">{label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   ) : (
     <Placeholder Icon={ExtensionsIcon} title="Extensions" body="An extension marketplace is planned." />

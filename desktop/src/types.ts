@@ -184,14 +184,19 @@ export interface CompletionOptions {
 }
 
 // ── lib/settings.ts ───────────────────────────────────────────────────
+export type EditorLineNumbers = "on" | "relative" | "off";
+
 export interface Settings {
   iconTheme: string;
   sidebarVisible: boolean;
   sidebarWidth: number;
   terminalVisible: boolean;
-  layoutMode: string;
+  layoutMode: LayoutMode;
   editorFontFamily: string;
   editorFontSize: number;
+  editorWordWrap: boolean;
+  editorMinimap: boolean;
+  editorLineNumbers: EditorLineNumbers;
 }
 
 // ── lib/fs.ts ─────────────────────────────────────────────────────────

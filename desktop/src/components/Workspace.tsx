@@ -51,8 +51,18 @@ import { CloseGlyph } from "../icons";
 // once a file is actually opened.
 const CodeEditor = lazy(() => import("./CodeEditor"));
 const ImageViewer = lazy(() => import("./ImageViewer"));
+const PdfViewer = lazy(() => import("./PdfViewer"));
 const DrawioEditor = lazy(() => import("./DrawioEditor"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
+const RichTextEditor = lazy(() => import("./RichTextEditor"));
+
+type MarkdownViewMode = "preview" | "rich" | "markdown";
+
+const MARKDOWN_VIEWS: { id: MarkdownViewMode; label: string; title: string }[] = [
+  { id: "preview", label: "Preview", title: "Read-only rendered view" },
+  { id: "rich", label: "Visual Editor", title: "Format visually without markdown syntax" },
+  { id: "markdown", label: "Code", title: "Raw markdown" },
+];
 
 function relativeTo(root: string, path: string): string {
   if (!path.startsWith(root)) return baseName(path);
@@ -86,6 +96,11 @@ function isImagePath(p: string): boolean {
   return IMAGE_EXTS.has(extensionOf(p));
 }
 
+function isPdfPath(p: string): boolean {
+  if (isDiffPath(p)) return false;
+  return extensionOf(p) === "pdf";
+}
+
 function isMarkdownPath(p: string): boolean {
   if (isDiffPath(p)) return false;
   const ext = extensionOf(p);
@@ -117,7 +132,7 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
   buffersRef.current = buffers;
   const [diffBuffers, setDiffBuffers] = useState<Record<string, { original: string; modified: string }>>({});
   const [cursor, setCursor] = useState<CursorPos | null>(null);
-  const [markdownPreviewMode, setMarkdownPreviewMode] = useState<Record<string, "preview" | "markdown">>({});
+  const [markdownPreviewMode, setMarkdownPreviewMode] = useState<Record<string, MarkdownViewMode>>({});
 
   const [activeView, setActiveView] = useState<ViewId>("explorer");
   const sidebarVisible = useSetting("sidebarVisible");
@@ -209,8 +224,8 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     async (filePath: string) => {
       setActivePath(filePath);
       setOpenPaths((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]));
-      // Skip text read for images and drawio — they handle their own file reading.
-      if (isImagePath(filePath) || isDrawioPath(filePath)) {
+      // Skip text read for binary previews — they handle their own file reading.
+      if (isImagePath(filePath) || isDrawioPath(filePath) || isPdfPath(filePath)) {
         setBuffers((prev) => ({ ...prev, [filePath]: { value: "", saved: "" } }));
         return;
       }
@@ -248,6 +263,11 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
   }, [path, openFile]);
 
   const closeTab = useCallback((filePath: string) => {
+    // Closing settings must also release the sidebar, or its section list stays
+    // up next to whichever file becomes active.
+    if (filePath === SETTINGS_URI) {
+      setActiveView((view) => (view === "settings" ? "explorer" : view));
+    }
     setOpenPaths((prev) => {
       const next = prev.filter((p) => p !== filePath);
       setActivePath((current) => {
@@ -697,33 +717,35 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
               onReorder={(newTabs) => setOpenPaths(newTabs.map((t) => t.path))}
             />
           )}
-          {activePath && !isSettingsTab && !isDiffPath(activePath) && !isImagePath(activePath) && !isDrawioPath(activePath) && !activeBuffer?.error && (
+          {activePath && !isSettingsTab && !isDiffPath(activePath) && !isImagePath(activePath) && !isDrawioPath(activePath) && !isPdfPath(activePath) && !activeBuffer?.error && (
             <div className="flex items-center justify-between border-b border-white/[0.05] px-4">
               <Breadcrumbs relPath={activeRel} />
               {isMarkdownPath(activePath) && (
-                <div className="flex items-center gap-1 rounded-md bg-white/[0.03] p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setMarkdownPreviewMode((prev) => ({ ...prev, [activePath]: "preview" }))}
-                    className={`rounded px-3 py-1 text-xs transition-colors ${
-                      markdownPreviewMode[activePath] === "preview"
-                        ? "bg-white/[0.08] text-zinc-200"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMarkdownPreviewMode((prev) => ({ ...prev, [activePath]: "markdown" }))}
-                    className={`rounded px-3 py-1 text-xs transition-colors ${
-                      markdownPreviewMode[activePath] === "markdown"
-                        ? "bg-white/[0.08] text-zinc-200"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    Markdown
-                  </button>
+                <div
+                  role="radiogroup"
+                  aria-label="Markdown view mode"
+                  className="flex shrink-0 items-center gap-0.5 rounded-md bg-white/[0.03] p-0.5"
+                >
+                  {MARKDOWN_VIEWS.map((view) => {
+                    const active = (markdownPreviewMode[activePath] ?? "preview") === view.id;
+                    return (
+                      <button
+                        key={view.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        title={view.title}
+                        onClick={() =>
+                          setMarkdownPreviewMode((prev) => ({ ...prev, [activePath]: view.id }))
+                        }
+                        className={`focus-ring rounded px-2.5 py-1 text-xs transition-colors ${
+                          active ? "bg-white/[0.08] text-zinc-200" : "text-zinc-500 hover:text-zinc-300"
+                        }`}
+                      >
+                        {view.label}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -752,13 +774,26 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
               <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
                 <DrawioEditor path={activePath} />
               </Suspense>
+            ) : activePath && isPdfPath(activePath) ? (
+              <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
+                <PdfViewer path={activePath} />
+              </Suspense>
             ) : activePath && activeBuffer ? (
               activeBuffer.error ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <p className="text-sm text-zinc-400">Can’t open {baseName(activePath)}</p>
                   <p className="max-w-md text-xs text-zinc-400">{activeBuffer.error}</p>
                 </div>
-              ) : isMarkdownPath(activePath) && markdownPreviewMode[activePath] === "preview" ? (
+              ) : isMarkdownPath(activePath) && markdownPreviewMode[activePath] === "rich" ? (
+                <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
+                  <RichTextEditor
+                    path={activePath}
+                    content={activeBuffer.value}
+                    onChange={(v) => handleChange(activePath, v)}
+                    onSave={() => saveFile(activePath)}
+                  />
+                </Suspense>
+              ) : isMarkdownPath(activePath) && markdownPreviewMode[activePath] !== "markdown" ? (
                 <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
                   <MarkdownPreview path={activePath} content={activeBuffer.value} />
                 </Suspense>

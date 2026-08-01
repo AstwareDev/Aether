@@ -13,6 +13,34 @@
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
+:root {
+  --line-1: rgba(255, 255, 255, 0.05);
+  --line-2: rgba(255, 255, 255, 0.08);
+  --line-3: rgba(255, 255, 255, 0.14);
+  --fill-1: rgba(255, 255, 255, 0.02);
+  --fill-2: rgba(255, 255, 255, 0.035);
+  --fill-3: rgba(255, 255, 255, 0.06);
+  --ring-focus: rgba(255, 255, 255, 0.28);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* One focus treatment for every interactive settings control. */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  box-shadow:
+    0 0 0 1px var(--ring-focus),
+    0 0 0 4px rgba(255, 255, 255, 0.06);
+}
+
+/* Indent-guide rail that gives each settings group a spine. */
+.hairline-rail {
+  border-left: 1px solid var(--line-1);
+}
+
 html,
 body,
 #root {
@@ -85,6 +113,12 @@ body {
 }
 .range-accent::-webkit-slider-thumb:hover {
   transform: scale(1.2);
+}
+.range-accent:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
+}
+.range-accent:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
 }
 .range-accent::-moz-range-track {
   height: 4px;

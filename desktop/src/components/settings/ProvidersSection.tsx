@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { motion } from "motion/react";
 import {
   CUSTOM_TEMPLATES,
   addProvider,
@@ -15,8 +14,11 @@ import {
   useAiConfig,
 } from "../../lib/ai";
 import {
+  ConfirmAction,
+  Disclosure,
   Field,
-  SectionHeader,
+  Group,
+  LiveMessage,
   StatusDot,
   Toggle,
   buttonClass,
@@ -60,13 +62,8 @@ export default function ProvidersSection() {
   };
 
   return (
-    <div className="space-y-6">
-      <SectionHeader
-        title="Models & Providers"
-        description="Connect a gateway or a local server. Every AI flow picks a provider from this list."
-      />
-
-      <div className="space-y-3">
+    <div className="space-y-9">
+      <Group label="Connected">
         {config.providers.map((provider) => (
           <ProviderCard
             key={provider.id}
@@ -75,22 +72,23 @@ export default function ProvidersSection() {
             onFetchModels={() => fetchModels(provider)}
           />
         ))}
-      </div>
+      </Group>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
-        <span className="text-xs text-zinc-500">Add a provider:</span>
-        {CUSTOM_TEMPLATES.map((preset) => (
-          <button
-            key={preset.wire}
-            type="button"
-            onClick={() => addCustom(preset.wire)}
-            title={preset.description}
-            className={buttonClass}
-          >
-            + {preset.label}
-          </button>
-        ))}
-      </div>
+      <Group label="Add a provider">
+        <div className="flex flex-wrap items-center gap-2">
+          {CUSTOM_TEMPLATES.map((preset) => (
+            <button
+              key={preset.wire}
+              type="button"
+              onClick={() => addCustom(preset.wire)}
+              title={preset.description}
+              className={buttonClass}
+            >
+              + {preset.label}
+            </button>
+          ))}
+        </div>
+      </Group>
     </div>
   );
 }
@@ -112,123 +110,126 @@ function ProviderCard({
   const acceptsKey = providerAcceptsKey(provider);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-white/[0.08]">
-      <div className="flex items-center gap-3 px-4 py-3">
-        <StatusDot ok={ready} title={ready ? "Ready" : "Needs configuration"} />
-        <button type="button" onClick={() => setOpen((v) => !v)} className="min-w-0 flex-1 text-left">
-          <span className="block truncate text-sm font-medium text-zinc-200">{provider.label}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-zinc-500">
-            {template?.description ?? `${provider.wire === "anthropic" ? "Anthropic" : "OpenAI"}-compatible · ${provider.baseUrl || "no base URL"}`}
-          </span>
-        </button>
-        <span className="shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-          {provider.wire}
-        </span>
-        <span className="shrink-0 text-[11px] text-zinc-500">{models.length} models</span>
-        <Toggle
-          checked={provider.enabled}
-          onChange={(enabled) => updateProvider(provider.id, { enabled })}
-          label={`Enable ${provider.label}`}
+    <Disclosure
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      header={({ buttonProps }) => (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+          <StatusDot ok={ready} label={ready ? "Ready" : "Needs configuration"} />
+          <button {...buttonProps} className="focus-ring min-w-0 flex-1 rounded text-left">
+            <span className="block truncate text-[13px] font-medium text-zinc-200">
+              {provider.label}
+            </span>
+            <span className="mt-0.5 block truncate text-[12px] text-zinc-400">
+              {template?.description ??
+                `${provider.wire === "anthropic" ? "Anthropic" : "OpenAI"}-compatible · ${provider.baseUrl || "no base URL"}`}
+            </span>
+          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
+              {provider.wire}
+            </span>
+            <span className="text-[12px] text-zinc-400">{models.length} models</span>
+            <Toggle
+              checked={provider.enabled}
+              onChange={(enabled) => updateProvider(provider.id, { enabled })}
+              label={`Enable ${provider.label}`}
+            />
+          </div>
+        </div>
+      )}
+    >
+      {isCustom && (
+        <Field label="Name">
+          <input
+            value={provider.label}
+            spellCheck={false}
+            onChange={(e) => updateProvider(provider.id, { label: e.target.value })}
+            className={inputClass}
+          />
+        </Field>
+      )}
+
+      <Field
+        label="Base URL"
+        hint={
+          provider.wire === "anthropic"
+            ? "Requests go to <base>/v1/messages."
+            : "Requests go to <base>/v1/chat/completions."
+        }
+      >
+        <input
+          value={provider.baseUrl}
+          spellCheck={false}
+          placeholder={template?.defaultBaseUrl ?? "https://"}
+          onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
+          className={monoInputClass}
         />
+      </Field>
+
+      {acceptsKey && (
+        <Field
+          label="API key"
+          hint="Saved in this app's local settings in plain text, and sent with requests made from the Rust backend."
+        >
+          <input
+            type="password"
+            value={provider.apiKey}
+            spellCheck={false}
+            placeholder={template?.keyPlaceholder || "sk-…"}
+            onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
+            className={monoInputClass}
+          />
+        </Field>
+      )}
+
+      <Field label="Models" hint="One model ID per line. Fetching merges whatever the endpoint reports.">
+        <textarea
+          value={provider.models.join("\n")}
+          spellCheck={false}
+          rows={Math.min(8, Math.max(3, provider.models.length + 1))}
+          placeholder={template?.catalog.length ? "Built-in catalog is used when empty" : "model-id"}
+          onChange={(e) =>
+            updateProvider(provider.id, {
+              models: e.target.value
+                .split("\n")
+                .map((m) => m.trim())
+                .filter(Boolean),
+            })
+          }
+          className={`${monoInputClass} resize-y`}
+        />
+      </Field>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {supportsModelListing(provider) && (
+          <button
+            type="button"
+            onClick={onFetchModels}
+            disabled={probe?.state === "loading" || !provider.baseUrl.trim()}
+            className={buttonClass}
+          >
+            {probe?.state === "loading" ? "Fetching…" : "Fetch models"}
+          </button>
+        )}
+        {isCustom && (
+          <ConfirmAction
+            label="Remove"
+            question={`Remove ${provider.label}?`}
+            confirmLabel="Remove"
+            onConfirm={() => removeProvider(provider.id)}
+          />
+        )}
       </div>
 
-      {open && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          transition={{ duration: 0.15 }}
-          className="space-y-3 border-t border-white/[0.06] bg-white/[0.015] px-4 py-4"
+      {probe && probe.state !== "idle" && (
+        <LiveMessage
+          busy={probe.state === "loading"}
+          tone={probe.state === "ok" ? "ok" : probe.state === "error" ? "error" : "muted"}
         >
-          {isCustom && (
-            <Field label="Name">
-              <input
-                value={provider.label}
-                spellCheck={false}
-                onChange={(e) => updateProvider(provider.id, { label: e.target.value })}
-                className={inputClass}
-              />
-            </Field>
-          )}
-
-          <Field
-            label="Base URL"
-            hint={
-              provider.wire === "anthropic"
-                ? "Requests go to <base>/v1/messages."
-                : "Requests go to <base>/v1/chat/completions."
-            }
-          >
-            <input
-              value={provider.baseUrl}
-              spellCheck={false}
-              placeholder={template?.defaultBaseUrl ?? "https://"}
-              onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
-              className={monoInputClass}
-            />
-          </Field>
-
-          {acceptsKey && (
-            <Field label="API key" hint="Stored locally and sent only from the Rust backend.">
-              <input
-                type="password"
-                value={provider.apiKey}
-                spellCheck={false}
-                placeholder={template?.keyPlaceholder || "sk-…"}
-                onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
-                className={monoInputClass}
-              />
-            </Field>
-          )}
-
-          <Field
-            label="Models"
-            hint="One model ID per line. Fetching merges whatever the endpoint reports."
-          >
-            <textarea
-              value={provider.models.join("\n")}
-              spellCheck={false}
-              rows={Math.min(8, Math.max(3, provider.models.length + 1))}
-              placeholder={template?.catalog.length ? "Built-in catalog is used when empty" : "model-id"}
-              onChange={(e) =>
-                updateProvider(provider.id, {
-                  models: e.target.value
-                    .split("\n")
-                    .map((m) => m.trim())
-                    .filter(Boolean),
-                })
-              }
-              className={`${monoInputClass} resize-y`}
-            />
-          </Field>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {supportsModelListing(provider) && (
-              <button
-                type="button"
-                onClick={onFetchModels}
-                disabled={probe?.state === "loading" || !provider.baseUrl.trim()}
-                className={buttonClass}
-              >
-                {probe?.state === "loading" ? "Fetching…" : "Fetch models"}
-              </button>
-            )}
-            {isCustom && (
-              <button
-                type="button"
-                onClick={() => removeProvider(provider.id)}
-                className="shrink-0 rounded-lg border border-red-500/25 px-3 py-2 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10"
-              >
-                Remove
-              </button>
-            )}
-            {probe && probe.state !== "loading" && probe.message && (
-              <span className={`text-[11px] ${probe.state === "ok" ? "text-emerald-400" : "text-red-400"}`}>
-                {probe.message}
-              </span>
-            )}
-          </div>
-        </motion.div>
+          {probe.state === "loading" ? "Fetching models…" : probe.message}
+        </LiveMessage>
       )}
-    </div>
+    </Disclosure>
   );
 }

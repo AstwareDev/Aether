@@ -1,0 +1,166 @@
+/* Shared document styling for the markdown preview and rich-text editor, so
+   toggling between them does not reflow or restyle the page. */
+
+.aether-md {
+  color: #d4d4d8;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.aether-md > :first-child {
+  margin-top: 0;
+}
+
+.aether-md h1,
+.aether-md h2,
+.aether-md h3,
+.aether-md h4,
+.aether-md h5,
+.aether-md h6 {
+  color: #fafafa;
+  font-weight: 600;
+}
+
+.aether-md h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin: 0 0 0.8em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.3em;
+}
+
+.aether-md h2 {
+  font-size: 1.5em;
+  margin: 1.5em 0 0.75em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.3em;
+}
+
+.aether-md h3 {
+  font-size: 1.25em;
+  margin: 1.25em 0 0.5em;
+}
+
+.aether-md h4,
+.aether-md h5,
+.aether-md h6 {
+  margin: 1em 0 0.5em;
+}
+
+.aether-md p {
+  margin: 1em 0;
+}
+
+.aether-md a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.aether-md a:hover {
+  text-decoration: underline;
+}
+
+.aether-md strong {
+  color: #fafafa;
+  font-weight: 600;
+}
+
+.aether-md code {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.2em 0.4em;
+  font-size: 0.9em;
+  color: #fca5a5;
+  font-family: var(--font-mono);
+}
+
+.aether-md pre {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 1em;
+  overflow-x: auto;
+  margin: 1.5em 0;
+}
+
+.aether-md pre code {
+  background: transparent;
+  padding: 0;
+  color: #d4d4d8;
+}
+
+.aether-md blockquote {
+  border-left: 4px solid rgba(255, 255, 255, 0.2);
+  padding-left: 1em;
+  margin-left: 0;
+  color: #a1a1aa;
+  font-style: italic;
+}
+
+.aether-md ul,
+.aether-md ol {
+  padding-left: 1.5em;
+  margin: 1em 0;
+}
+
+.aether-md li {
+  margin: 0.5em 0;
+}
+
+.aether-md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 1.5em 0;
+}
+
+/* An image that could not be read still has to be visible and selectable. */
+.aether-md .aether-md-broken {
+  display: inline-block;
+  border: 1px dashed rgba(248, 113, 113, 0.4);
+  border-radius: 6px;
+  padding: 0.4em 0.7em;
+  color: #fca5a5;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.aether-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5em 0;
+}
+
+.aether-md th,
+.aether-md td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.aether-md th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #fafafa;
+}
+
+.aether-md hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 2em 0;
+}
+
+.aether-md input[type="checkbox"] {
+  margin-right: 0.5em;
+}
+
+/* Rich-text mode: the same document, editable. */
+.aether-md[contenteditable="true"] {
+  outline: none;
+}
+
+.aether-md[contenteditable="true"]:empty::before {
+  content: attr(data-placeholder);
+  color: #52525b;
+}

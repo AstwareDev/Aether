@@ -1,11 +1,38 @@
-import { setSetting, useSetting } from "../../lib/settings";
-import { Field, SectionHeader, selectClass } from "./primitives";
-import type { LayoutMode } from "../../types";
+import { Suspense, lazy, useId } from "react";
+import {
+  EDITOR_FONT_SIZE_RANGE,
+  SETTINGS_DEFAULTS,
+  SIDEBAR_WIDTH_RANGE,
+  setSetting,
+  useSetting,
+} from "../../lib/settings";
+import { iconThemes } from "../../lib/icons/registry";
+import {
+  Field,
+  Group,
+  OptionCard,
+  SegmentedControl,
+  Select,
+  SettingRow,
+  Slider,
+  Toggle,
+  buttonClass,
+} from "./primitives";
+import type { EditorLineNumbers, LayoutMode } from "../../types";
+
+// Monaco is heavy; the preview loads only once Appearance is opened.
+const EditorPreview = lazy(() => import("./EditorPreview"));
 
 const LAYOUT_OPTIONS: { id: LayoutMode; label: string; description: string }[] = [
   { id: "aether", label: "Aether", description: "Activity bar at the top of the sidebar." },
   { id: "vscode", label: "VSCode", description: "Activity bar on the left edge with standard icons." },
   { id: "compact", label: "Compact", description: "VSCode layout with small, compact icons." },
+];
+
+const LINE_NUMBER_OPTIONS: { value: EditorLineNumbers; label: string }[] = [
+  { value: "on", label: "On" },
+  { value: "relative", label: "Relative" },
+  { value: "off", label: "Off" },
 ];
 
 const COMMON_FONTS = [
@@ -19,64 +46,153 @@ const COMMON_FONTS = [
 
 export default function AppearanceSection() {
   const layoutMode = useSetting("layoutMode");
+  const iconTheme = useSetting("iconTheme");
+  const sidebarWidth = useSetting("sidebarWidth");
   const editorFontFamily = useSetting("editorFontFamily");
   const editorFontSize = useSetting("editorFontSize");
+  const editorWordWrap = useSetting("editorWordWrap");
+  const editorMinimap = useSetting("editorMinimap");
+  const editorLineNumbers = useSetting("editorLineNumbers");
+
+  const fontId = useId();
+  const sizeId = useId();
+  const iconId = useId();
+  const widthId = useId();
+  const wrapId = useId();
+  const minimapId = useId();
 
   return (
-    <div className="space-y-8">
-      <SectionHeader title="Appearance" description="Customize the look and feel of the editor." />
+    <div className="space-y-9">
+      <Group label="Editor">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.012] px-4 py-3">
+          <div className="grid gap-3 @md:grid-cols-2">
+            <Field label="Font" hint="Installed fonts only — Aether can't install one for you." htmlFor={fontId}>
+              <Select
+                id={fontId}
+                value={editorFontFamily}
+                onChange={(value) => setSetting("editorFontFamily", value)}
+                options={COMMON_FONTS.map((font) => ({
+                  value: font,
+                  label: font.split(",")[0].replace(/['"]/g, ""),
+                }))}
+              />
+            </Field>
+            <Field label="Size" htmlFor={sizeId}>
+              <Slider
+                id={sizeId}
+                value={editorFontSize}
+                min={EDITOR_FONT_SIZE_RANGE.min}
+                max={EDITOR_FONT_SIZE_RANGE.max}
+                onChange={(value) => setSetting("editorFontSize", value)}
+                label="Editor font size"
+                format={(v) => `${v}px`}
+              />
+            </Field>
+          </div>
 
-      <Field label="Editor Font Family">
-        <select
-          value={editorFontFamily}
-          onChange={(e) => setSetting("editorFontFamily", e.target.value)}
-          className={selectClass}
+        </div>
+
+        <SettingRow
+          label="Word wrap"
+          description="Wrap long lines to the width of the editor instead of scrolling sideways."
+          htmlFor={wrapId}
+          control={
+            <Toggle
+              id={wrapId}
+              checked={editorWordWrap}
+              onChange={(value) => setSetting("editorWordWrap", value)}
+              label="Word wrap"
+            />
+          }
+        />
+
+        <SettingRow
+          label="Minimap"
+          description="Show a scaled overview of the file along the right edge."
+          htmlFor={minimapId}
+          control={
+            <Toggle
+              id={minimapId}
+              checked={editorMinimap}
+              onChange={(value) => setSetting("editorMinimap", value)}
+              label="Minimap"
+            />
+          }
+        />
+
+        <SettingRow
+          label="Line numbers"
+          description="Relative numbers count from the cursor, which suits keyboard-driven jumps."
+          control={
+            <SegmentedControl
+              value={editorLineNumbers}
+              onChange={(value) => setSetting("editorLineNumbers", value)}
+              options={LINE_NUMBER_OPTIONS}
+              label="Line numbers"
+            />
+          }
+        />
+
+        <Suspense
+          fallback={<div className="h-[297px] rounded-lg border border-white/[0.06] bg-abyss" />}
         >
-          {COMMON_FONTS.map((font) => (
-            <option key={font} value={font} className="bg-[#1a1a1a] text-white">
-              {font.split(",")[0].replace(/['"]/g, "")}
-            </option>
-          ))}
-        </select>
-      </Field>
+          <EditorPreview />
+        </Suspense>
+      </Group>
 
-      <Field label="Editor Font Size">
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min="10"
-            max="24"
-            value={editorFontSize}
-            onChange={(e) => setSetting("editorFontSize", Number(e.target.value))}
-            className="flex-1"
+      <Group label="Interface">
+        <SettingRow label="File icons" description="Icon set used across the explorer and tabs." htmlFor={iconId}>
+          <Select
+            id={iconId}
+            value={iconTheme}
+            onChange={(value) => setSetting("iconTheme", value)}
+            options={iconThemes.map((theme) => ({ value: theme.id, label: theme.label }))}
           />
-          <span className="w-12 text-right text-sm font-medium text-white">{editorFontSize}px</span>
-        </div>
-      </Field>
+        </SettingRow>
 
-      <div className="space-y-3">
-        <SectionHeader title="Sidebar Layout" description="Choose the sidebar layout style." />
-        <div className="flex flex-col gap-2">
+        <SettingRow
+          label="Sidebar width"
+          description="Drag the sidebar edge, or set it here."
+          htmlFor={widthId}
+          control={
+            sidebarWidth === SETTINGS_DEFAULTS.sidebarWidth ? undefined : (
+              <button
+                type="button"
+                onClick={() => setSetting("sidebarWidth", SETTINGS_DEFAULTS.sidebarWidth)}
+                className={buttonClass}
+              >
+                Reset
+              </button>
+            )
+          }
+        >
+          <Slider
+            id={widthId}
+            value={sidebarWidth}
+            min={SIDEBAR_WIDTH_RANGE.min}
+            max={SIDEBAR_WIDTH_RANGE.max}
+            step={2}
+            onChange={(value) => setSetting("sidebarWidth", value)}
+            label="Sidebar width"
+            format={(v) => `${v}px`}
+          />
+        </SettingRow>
+      </Group>
+
+      <Group label="Layout">
+        <div role="radiogroup" aria-label="Sidebar layout" className="flex flex-col gap-2">
           {LAYOUT_OPTIONS.map((opt) => (
-            <button
+            <OptionCard
               key={opt.id}
-              type="button"
-              onClick={() => setSetting("layoutMode", opt.id)}
-              className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 text-left transition-colors ${
-                layoutMode === opt.id ? "border-accent/60 bg-accent/15" : "border-white/[0.08] hover:border-white/20"
-              }`}
-            >
-              <LayoutPreview mode={opt.id} active={layoutMode === opt.id} />
-              <div className="min-w-0">
-                <span className={`text-sm font-medium ${layoutMode === opt.id ? "text-white" : "text-zinc-300"}`}>
-                  {opt.label}
-                </span>
-                <p className="mt-0.5 text-[11px] text-zinc-500">{opt.description}</p>
-              </div>
-            </button>
+              selected={layoutMode === opt.id}
+              onSelect={() => setSetting("layoutMode", opt.id)}
+              title={opt.label}
+              description={opt.description}
+              visual={<LayoutPreview mode={opt.id} active={layoutMode === opt.id} />}
+            />
           ))}
         </div>
-      </div>
+      </Group>
     </div>
   );
 }
