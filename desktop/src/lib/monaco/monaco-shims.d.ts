@@ -62,14 +62,43 @@ declare module "monaco-editor/esm/vs/language/typescript/monaco.contribution.js"
   export interface TsCompilerOptions {
     target?: number;
     jsx?: number;
+    jsxImportSource?: string;
     allowNonTsExtensions?: boolean;
     moduleResolution?: number;
     allowJs?: boolean;
+    esModuleInterop?: boolean;
+    allowSyntheticDefaultImports?: boolean;
+    skipLibCheck?: boolean;
+    resolveJsonModule?: boolean;
+    baseUrl?: string;
+    paths?: Record<string, string[]>;
+  }
+  export interface TsDiagnosticsOptions {
+    noSemanticValidation?: boolean;
+    noSyntaxValidation?: boolean;
+    noSuggestionDiagnostics?: boolean;
+    diagnosticCodesToIgnore?: number[];
   }
   export interface TsLanguageServiceDefaults {
     setCompilerOptions(options: TsCompilerOptions): void;
+    setDiagnosticsOptions(options: TsDiagnosticsOptions): void;
+    setEagerModelSync(value: boolean): void;
     addExtraLib(content: string, filePath?: string): { dispose(): void };
   }
   export const typescriptDefaults: TsLanguageServiceDefaults;
   export const javascriptDefaults: TsLanguageServiceDefaults;
+}
+
+// The Monarch grammars behind the basic languages. Imported directly so the
+// JSX-aware variants can be derived from them (see monaco/jsx.ts).
+declare module "monaco-editor/esm/vs/basic-languages/typescript/typescript.js" {
+  import type { languages } from "monaco-editor/esm/vs/editor/editor.api.js";
+  export const conf: languages.LanguageConfiguration;
+  export const language: languages.IMonarchLanguage;
+}
+
+declare module "monaco-editor/esm/vs/basic-languages/javascript/javascript.js" {
+  import type { languages } from "monaco-editor/esm/vs/editor/editor.api.js";
+  export const conf: languages.LanguageConfiguration;
+  export const language: languages.IMonarchLanguage;
 }

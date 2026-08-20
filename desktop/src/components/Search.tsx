@@ -41,10 +41,12 @@ interface FileMatches {
 
 interface SearchProps {
   rootPath: string;
+  /** Absolute folder the search should be limited to, from "Find in Folder…". */
+  scope?: string | null;
   onOpenFile?: (filePath: string, line?: number, column?: number) => void;
 }
 
-export default memo(function Search({ rootPath, onOpenFile }: SearchProps) {
+export default memo(function Search({ rootPath, scope, onOpenFile }: SearchProps) {
   const [query, setQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -107,6 +109,16 @@ export default memo(function Search({ rootPath, onOpenFile }: SearchProps) {
       setSearching(false);
     }
   }, [query, rootPath, caseSensitive, wholeWord, useRegex, includePattern, excludePattern]);
+
+  // "Find in Folder…" hands over an absolute folder; turn it into the glob the
+  // backend expects and reveal the filter row so the scope is visible.
+  useEffect(() => {
+    if (!scope) return;
+    const root = rootPath.replace(/[/\\]+$/, "");
+    const rel = scope.startsWith(root) ? scope.slice(root.length).replace(/^[/\\]/, "") : "";
+    setIncludePattern(rel ? `${rel.replace(/\\/g, "/")}/**` : "");
+    setShowFilters(true);
+  }, [scope, rootPath]);
 
   useEffect(() => {
     if (searchTimeoutRef.current) {

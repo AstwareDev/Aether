@@ -50,6 +50,34 @@ export async function copyEntry(from: string, to: string): Promise<void> {
   return invoke("copy_entry", { from, to });
 }
 
+export interface CopiedEntry {
+  /** Empty when the entry was materialised rather than copied, e.g. a pasted image. */
+  from: string;
+  to: string;
+}
+
+export interface ClipboardProbe {
+  kind: "files" | "image" | "none";
+  paths: string[];
+}
+
+/** Copies anything on disk into `dir`, renaming around name collisions. */
+export async function copyIntoDir(sources: string[], dir: string): Promise<CopiedEntry[]> {
+  return invoke<CopiedEntry[]>("copy_into_dir", { sources, dir });
+}
+
+export async function clipboardProbe(): Promise<ClipboardProbe> {
+  return invoke<ClipboardProbe>("clipboard_probe");
+}
+
+export async function clipboardPasteInto(dir: string): Promise<CopiedEntry[]> {
+  return invoke<CopiedEntry[]>("clipboard_paste_into", { dir });
+}
+
+export async function clipboardWritePaths(paths: string[]): Promise<void> {
+  return invoke("clipboard_write_paths", { paths });
+}
+
 export function baseName(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
   const parts = normalized.split(/[\\/]/);

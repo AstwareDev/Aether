@@ -12,6 +12,11 @@ const DEFAULTS: Settings = {
   editorWordWrap: true,
   editorMinimap: false,
   editorLineNumbers: "on",
+  explorerCompactFolders: true,
+  explorerAutoReveal: true,
+  explorerGitDecorations: true,
+  explorerOpenEditors: true,
+  explorerOpenEditorsExpanded: false,
 };
 
 export const SIDEBAR_WIDTH_RANGE = { min: 180, max: 480 } as const;
@@ -65,6 +70,14 @@ function hydrate(raw: unknown, defaults: Settings): Settings {
     editorWordWrap: bool(stored.editorWordWrap, defaults.editorWordWrap),
     editorMinimap: bool(stored.editorMinimap, defaults.editorMinimap),
     editorLineNumbers: oneOf(stored.editorLineNumbers, LINE_NUMBER_MODES, defaults.editorLineNumbers),
+    explorerCompactFolders: bool(stored.explorerCompactFolders, defaults.explorerCompactFolders),
+    explorerAutoReveal: bool(stored.explorerAutoReveal, defaults.explorerAutoReveal),
+    explorerGitDecorations: bool(stored.explorerGitDecorations, defaults.explorerGitDecorations),
+    explorerOpenEditors: bool(stored.explorerOpenEditors, defaults.explorerOpenEditors),
+    explorerOpenEditorsExpanded: bool(
+      stored.explorerOpenEditorsExpanded,
+      defaults.explorerOpenEditorsExpanded,
+    ),
   };
 }
 
@@ -87,21 +100,9 @@ export const SETTINGS_SECTIONS: {
     description: "Set the editor font, gutter, and how the workbench is arranged.",
   },
   {
-    id: "models",
-    label: "Models & Providers",
-    description: "Connect a gateway or a local server. Every AI flow picks a provider from this list.",
-  },
-  {
-    id: "ai-tools",
-    label: "AI Tools",
-    description:
-      "Choose what the inline agent may call while it gathers context, and how far a single run may go.",
-  },
-  {
-    id: "ai-config",
-    label: "AI Configuration",
-    description:
-      "Route each flow to its own provider, model, and reasoning effort. Set Default once and let the rest inherit.",
+    id: "explorer",
+    label: "Explorer",
+    description: "How the file tree presents your workspace, and what it surfaces alongside it.",
   },
 ];
 

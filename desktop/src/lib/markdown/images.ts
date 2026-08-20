@@ -60,6 +60,23 @@ export function loadImageUrl(absPath: string): Promise<string> {
   return pending;
 }
 
+/**
+ * Display URL for an image src in the rich-text editor. Remote and inline
+ * sources pass through; local paths become blob URLs. A failure returns the
+ * original src so the node keeps its author-written path and the editor shows
+ * its own broken-image affordance rather than throwing.
+ *
+ * This is display-only: MDXEditor serializes the node's stored src, never this.
+ */
+export async function previewImageSrc(src: string, docPath: string): Promise<string> {
+  if (!src || isDirectUrl(src)) return src;
+  try {
+    return await loadImageUrl(resolveImagePath(src, docPath));
+  } catch {
+    return src;
+  }
+}
+
 function markBroken(img: HTMLImageElement, href: string): void {
   const fallback = document.createElement("span");
   fallback.className = "aether-md-broken";

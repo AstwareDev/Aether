@@ -31,3 +31,6 @@ base64 = "0.22"
 regex = "1"
 globset = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+

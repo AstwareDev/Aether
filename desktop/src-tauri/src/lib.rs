@@ -474,6 +474,213 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Next free name in `dir` for `name`, following the `file copy`, `file copy 2`
+/// convention Explorer and Finder both use.
+fn unique_destination(dir: &Path, name: &str) -> std::path::PathBuf {
+    let direct = dir.join(name);
+    if !direct.exists() {
+        return direct;
+    }
+    let as_path = Path::new(name);
+    let stem = as_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.to_string());
+    let ext = as_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+
+    for n in 1..1000 {
+        let attempt = if n == 1 {
+            format!("{stem} copy{ext}")
+        } else {
+            format!("{stem} copy {n}{ext}")
+        };
+        let candidate = dir.join(attempt);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{stem} copy {}{ext}", std::process::id()))
+}
+
+#[derive(Serialize)]
+struct CopiedEntry {
+    from: String,
+    to: String,
+}
+
+/// Copies files and folders from anywhere on disk into `dir`, renaming around
+/// collisions. Backs paste, drag-and-drop from the OS, and in-app copy.
+#[tauri::command]
+async fn copy_into_dir(sources: Vec<String>, dir: String) -> Result<Vec<CopiedEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || copy_into_dir_blocking(sources, &dir))
+        .await
+        .map_err(|e| format!("task failed: {e}"))?
+}
+
+fn copy_into_dir_blocking(sources: Vec<String>, dir: &str) -> Result<Vec<CopiedEntry>, String> {
+    let dir_path = Path::new(dir);
+    if !dir_path.is_dir() {
+        return Err("The destination is not a folder.".to_string());
+    }
+
+    let mut copied = Vec::new();
+    let mut failures = Vec::new();
+
+    for source in sources {
+        let from = Path::new(&source);
+        let name = match from.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+        // Copying a folder into itself or one of its descendants would recurse.
+        if dir_path.starts_with(from) {
+            continue;
+        }
+        let to = unique_destination(dir_path, &name);
+        let outcome = match std::fs::symlink_metadata(from) {
+            Ok(meta) if meta.is_dir() => copy_dir_recursive(from, &to),
+            Ok(_) => std::fs::copy(from, &to).map(|_| ()).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        match outcome {
+            Ok(()) => copied.push(CopiedEntry {
+                from: source,
+                to: to.to_string_lossy().to_string(),
+            }),
+            Err(e) => failures.push(format!("{name}: {e}")),
+        }
+    }
+
+    if copied.is_empty() && !failures.is_empty() {
+        return Err(failures.join("; "));
+    }
+    Ok(copied)
+}
+
+#[derive(Serialize)]
+struct ClipboardProbe {
+    kind: &'static str,
+    paths: Vec<String>,
+}
+
+#[cfg(windows)]
+mod os_clipboard {
+    use clipboard_win::{formats, Clipboard, Setter};
+
+    pub fn file_list() -> Vec<String> {
+        clipboard_win::get_clipboard(formats::FileList).unwrap_or_default()
+    }
+
+    pub fn set_file_list(paths: &[String]) -> Result<(), String> {
+        let _owned = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
+        formats::FileList
+            .write_clipboard(&paths)
+            .map_err(|e| e.to_string())
+    }
+
+    /// PNG first — browsers and the Snipping Tool publish it, and it survives
+    /// round-tripping better than the DIB the bitmap format hands back.
+    pub fn image() -> Option<(&'static str, Vec<u8>)> {
+        if let Some(png) = clipboard_win::register_format("PNG") {
+            if clipboard_win::is_format_avail(png.get()) {
+                if let Ok(bytes) = clipboard_win::get_clipboard(formats::RawData(png.get())) {
+                    return Some(("png", bytes));
+                }
+            }
+        }
+        if clipboard_win::is_format_avail(formats::CF_DIB) {
+            if let Ok(bytes) = clipboard_win::get_clipboard(formats::Bitmap) {
+                return Some(("bmp", bytes));
+            }
+        }
+        None
+    }
+}
+
+#[cfg(not(windows))]
+mod os_clipboard {
+    pub fn file_list() -> Vec<String> {
+        Vec::new()
+    }
+
+    pub fn set_file_list(_paths: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn image() -> Option<(&'static str, Vec<u8>)> {
+        None
+    }
+}
+
+/// What a paste would produce, so the explorer can decide between the system
+/// clipboard and its own cut/copy buffer before acting.
+#[tauri::command]
+async fn clipboard_probe() -> Result<ClipboardProbe, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let paths = os_clipboard::file_list();
+        if !paths.is_empty() {
+            return ClipboardProbe {
+                kind: "files",
+                paths,
+            };
+        }
+        if os_clipboard::image().is_some() {
+            return ClipboardProbe {
+                kind: "image",
+                paths: Vec::new(),
+            };
+        }
+        ClipboardProbe {
+            kind: "none",
+            paths: Vec::new(),
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))
+}
+
+/// Pastes the system clipboard into `dir`: copied files and folders land as
+/// copies, a copied image is written out as a new file.
+#[tauri::command]
+async fn clipboard_paste_into(dir: String) -> Result<Vec<CopiedEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sources = os_clipboard::file_list();
+        if !sources.is_empty() {
+            return copy_into_dir_blocking(sources, &dir);
+        }
+
+        let (extension, bytes) = os_clipboard::image().ok_or("The clipboard has no files.")?;
+        let dir_path = Path::new(&dir);
+        if !dir_path.is_dir() {
+            return Err("The destination is not a folder.".to_string());
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let to = unique_destination(dir_path, &format!("Pasted image {stamp}.{extension}"));
+        std::fs::write(&to, bytes).map_err(|e| e.to_string())?;
+        Ok(vec![CopiedEntry {
+            from: String::new(),
+            to: to.to_string_lossy().to_string(),
+        }])
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// Publishes an in-app selection to the system clipboard so it can be pasted
+/// into Explorer and other applications.
+#[tauri::command]
+async fn clipboard_write_paths(paths: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || os_clipboard::set_file_list(&paths))
+        .await
+        .map_err(|e| format!("task failed: {e}"))?
+}
+
 #[derive(Serialize)]
 struct GitFileStatus {
     path: String,
@@ -1107,6 +1314,10 @@ pub fn run() {
             rename_entry,
             delete_entry,
             copy_entry,
+            copy_into_dir,
+            clipboard_probe,
+            clipboard_paste_into,
+            clipboard_write_paths,
             ai::ai_complete,
             ai::ai_list_models,
             exec_tool,

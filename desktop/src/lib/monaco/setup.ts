@@ -96,6 +96,9 @@ import "monaco-editor/esm/vs/language/html/monaco.contribution.js";
 import packageJsonSchema from "./schemas/package.schema.json";
 import tsconfigSchema from "./schemas/tsconfig.schema.json";
 import { registerReactTypes } from "./reactTypes";
+import { registerJsxGrammars } from "./jsx";
+import { registerSnippets } from "./snippets";
+import { registerAutoImports } from "./autoImport";
 import { configureMonacoTailwindcss } from "monaco-tailwind";
 import { emmetHTML, emmetCSS, emmetJSX } from "emmet-monaco-es";
 
@@ -150,15 +153,47 @@ jsonDefaults.setDiagnosticsOptions({
 const tsCompilerOptions = {
   target: ScriptTarget.ES2020,
   jsx: JsxEmit.ReactJSX,
+  jsxImportSource: "react",
   allowNonTsExtensions: true,
   moduleResolution: ModuleResolutionKind.NodeJs,
   allowJs: true,
+  esModuleInterop: true,
+  allowSyntheticDefaultImports: true,
+  skipLibCheck: true,
+  resolveJsonModule: true,
+  // The React typings are injected as extra libs under a virtual node_modules;
+  // without these mappings `import … from "react"` resolves from the source
+  // file's own directory, finds nothing, and every hook use reports as an
+  // undefined name.
+  baseUrl: "file:///",
+  paths: {
+    react: ["node_modules/@types/react/index.d.ts"],
+    "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"],
+    "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+    "react-dom/client": ["node_modules/@types/react-dom/client.d.ts"],
+  },
 };
 typescriptDefaults.setCompilerOptions(tsCompilerOptions);
 javascriptDefaults.setCompilerOptions(tsCompilerOptions);
 
+// Third-party packages have no typings inside the editor's virtual filesystem,
+// so "cannot find module" and the untyped-import warnings would underline every
+// dependency. Real errors in the user's own code still surface.
+const tsDiagnosticsOptions = {
+  diagnosticCodesToIgnore: [2307, 2792, 7016],
+};
+typescriptDefaults.setDiagnosticsOptions(tsDiagnosticsOptions);
+javascriptDefaults.setDiagnosticsOptions(tsDiagnosticsOptions);
+
+typescriptDefaults.setEagerModelSync(true);
+javascriptDefaults.setEagerModelSync(true);
+
 registerReactTypes(typescriptDefaults);
 registerReactTypes(javascriptDefaults);
+
+registerJsxGrammars(monaco);
+registerSnippets(monaco);
+registerAutoImports(monaco);
 
 (monaco.languages as unknown as { css: { cssDefaults: typeof cssDefaults } }).css = { cssDefaults };
 

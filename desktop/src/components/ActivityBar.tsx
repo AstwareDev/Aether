@@ -16,7 +16,7 @@ const ITEMS: ActivityBarItem[] = [
   { id: "extensions", label: "Extensions", Icon: ExtensionsIcon },
 ];
 
-export default memo(function ActivityBar({ activeView, onSelect, vertical, compact }: ActivityBarProps) {
+export default memo(function ActivityBar({ activeView, onSelect, onOpenSettings, vertical, compact }: ActivityBarProps) {
   const isVscode = vertical && !compact;
 
   const wrapper = vertical
@@ -81,21 +81,11 @@ export default memo(function ActivityBar({ activeView, onSelect, vertical, compa
       <div className={settingsSection}>
         <button
           type="button"
-          onClick={() => onSelect("settings")}
+          onClick={onOpenSettings}
           aria-label="Settings"
-          aria-pressed={activeView === "settings"}
           title="Settings"
-          className={`group relative flex items-center justify-center transition-colors duration-150 ${buttonClass} ${
-            activeView === "settings" ? "text-white" : "text-zinc-500 hover:text-zinc-200"
-          }`}
+          className={`group relative flex items-center justify-center text-zinc-500 transition-colors duration-150 hover:text-zinc-200 ${buttonClass}`}
         >
-          {activeView === "settings" && (
-            <motion.span
-              layoutId="activity-active"
-              className={activeIndicator}
-              transition={{ type: "spring", stiffness: 550, damping: 42 }}
-            />
-          )}
           <motion.span whileTap={{ scale: 0.86 }} className="flex items-center justify-center">
             <SettingsIcon size={iconSize} />
           </motion.span>

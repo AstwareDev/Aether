@@ -4,17 +4,18 @@ import ActivityBar from "./ActivityBar";
 import FileTree from "./FileTree";
 import SourceControl from "./SourceControl";
 import Search from "./Search";
-import { SETTINGS_SECTIONS, useSetting } from "../lib/settings";
-import { SectionIcon } from "../icons";
+import OpenEditors from "./OpenEditors";
+import { useSetting } from "../lib/settings";
 import {
   NewFileIcon,
   NewFolderIcon,
   RefreshIcon,
   CollapseAllIcon,
   ExtensionsIcon,
+  BrowserIcon,
 } from "../lib/icons/ui";
 import type { ComponentType } from "react";
-import type { UIIconProps, SidebarProps, SettingsSection } from "../types";
+import type { UIIconProps, SidebarProps, OpenEditorsProps } from "../types";
 
 function ToolbarButton({
   label,
@@ -46,17 +47,22 @@ function PanelContent({
   actions,
   expanded,
   onToggle,
+  onExpandPaths,
   refreshNonce,
   onNewFile,
   onNewFolder,
   onRefresh,
   onCollapseAll,
+  onOpenBrowser,
   onOpenPalette: _onOpenPalette,
   onChangeWorkspace,
   onGoHome,
   onOpenDiff,
-  settingsSection,
-  onSelectSettingsSection,
+  onOpenSearch,
+  onTargetDirChange,
+  onError,
+  searchScope,
+  openEditors,
 }: {
   view: SidebarProps["view"];
   rootPath: string;
@@ -64,21 +70,27 @@ function PanelContent({
   actions: SidebarProps["actions"];
   expanded: Set<string>;
   onToggle: (path: string) => void;
+  onExpandPaths: (paths: string[]) => void;
   refreshNonce: number;
   onNewFile: () => void;
   onNewFolder: () => void;
   onRefresh: () => void;
   onCollapseAll: () => void;
+  onOpenBrowser?: () => void;
   onOpenPalette: () => void;
   onChangeWorkspace: () => void;
   onGoHome: () => void;
   onOpenDiff?: (filePath: string) => void;
-  settingsSection?: SettingsSection;
-  onSelectSettingsSection?: (section: SettingsSection) => void;
+  onOpenSearch?: (scopePath: string) => void;
+  onTargetDirChange?: (dir: string) => void;
+  onError?: (message: string) => void;
+  searchScope?: string | null;
+  openEditors?: OpenEditorsProps;
 }) {
   return view === "explorer" ? (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="group flex items-center justify-between px-2 pb-1">
+      {openEditors && <OpenEditors {...openEditors} />}
+      <div className="group flex items-center justify-between px-2 pb-1 pt-1">
         <span className="truncate pl-2 text-[11px] font-bold uppercase tracking-wide text-zinc-300" title={rootPath}>
           {folderLabel}
         </span>
@@ -87,129 +99,87 @@ function PanelContent({
           <ToolbarButton label="New Folder" onClick={onNewFolder}><NewFolderIcon size={15} /></ToolbarButton>
           <ToolbarButton label="Refresh Explorer" onClick={onRefresh}><RefreshIcon size={15} /></ToolbarButton>
           <ToolbarButton label="Collapse Folders" onClick={onCollapseAll}><CollapseAllIcon size={15} /></ToolbarButton>
+          {onOpenBrowser && (
+            <ToolbarButton label="Open Simple Browser" onClick={onOpenBrowser}><BrowserIcon size={14} /></ToolbarButton>
+          )}
         </div>
       </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <FileTree rootPath={rootPath} actions={actions} expanded={expanded} onToggle={onToggle} refreshNonce={refreshNonce} onChangeWorkspace={onChangeWorkspace} onGoHome={onGoHome} />
-      </div>
+      <FileTree
+        rootPath={rootPath}
+        actions={actions}
+        expanded={expanded}
+        onToggle={onToggle}
+        onExpandPaths={onExpandPaths}
+        refreshNonce={refreshNonce}
+        onRefresh={onRefresh}
+        onChangeWorkspace={onChangeWorkspace}
+        onGoHome={onGoHome}
+        onOpenSearch={onOpenSearch}
+        onTargetDirChange={onTargetDirChange}
+        onError={onError}
+      />
     </div>
   ) : view === "search" ? (
-    <Search rootPath={rootPath} onOpenFile={actions.onOpenFile} />
+    <Search rootPath={rootPath} scope={searchScope ?? null} onOpenFile={actions.onOpenFile} />
   ) : view === "scm" ? (
     <SourceControl rootPath={rootPath} onOpenDiff={onOpenDiff} />
-  ) : view === "settings" ? (
-    <div className="flex min-h-0 flex-1 flex-col py-2">
-      <div className="flex items-center justify-between px-3 pb-2">
-        <span className="pl-1 text-[11px] font-bold uppercase tracking-wide text-zinc-300">
-          Settings
-        </span>
-      </div>
-      <nav aria-label="Settings sections" className="scroll-thin flex-1 overflow-y-auto px-2">
-        <ul className="space-y-1">
-          {SETTINGS_SECTIONS.map(({ id, label }) => {
-            const active = settingsSection === id;
-            return (
-              <li key={id}>
-                <button
-                  type="button"
-                  aria-current={active ? "page" : undefined}
-                  onClick={() => onSelectSettingsSection?.(id)}
-                  className={`focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-white/[0.08] text-white"
-                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                  }`}
-                >
-                  <SectionIcon section={id} />
-                  <span className="truncate">{label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </div>
   ) : (
     <Placeholder Icon={ExtensionsIcon} title="Extensions" body="An extension marketplace is planned." />
   );
 }
 
 export default memo(function Sidebar(props: SidebarProps) {
-  const {
-    view,
-    rootPath,
-    folderLabel,
-    width,
-    actions,
-    expanded,
-    onToggle,
-    refreshNonce,
-    onNewFile,
-    onNewFolder,
-    onRefresh,
-    onCollapseAll,
-    onOpenPalette: _onOpenPalette,
-    onSelectView,
-    onOpenSettings,
-    onChangeWorkspace,
-    onGoHome,
-    onOpenDiff,
-    settingsSection,
-    onSelectSettingsSection,
-  } = props;
-
+  const { view, width, onSelectView, onOpenSettings } = props;
   const layoutMode = useSetting("layoutMode");
+
+  const panel = (
+    <PanelContent
+      view={view}
+      rootPath={props.rootPath}
+      folderLabel={props.folderLabel}
+      actions={props.actions}
+      expanded={props.expanded}
+      onToggle={props.onToggle}
+      onExpandPaths={props.onExpandPaths}
+      refreshNonce={props.refreshNonce}
+      onNewFile={props.onNewFile}
+      onNewFolder={props.onNewFolder}
+      onRefresh={props.onRefresh}
+      onCollapseAll={props.onCollapseAll}
+      onOpenBrowser={props.onOpenBrowser}
+      onOpenPalette={props.onOpenPalette}
+      onChangeWorkspace={props.onChangeWorkspace}
+      onGoHome={props.onGoHome}
+      onOpenDiff={props.onOpenDiff}
+      onOpenSearch={props.onOpenSearch}
+      onTargetDirChange={props.onTargetDirChange}
+      onError={props.onError}
+      searchScope={props.searchScope}
+      openEditors={props.openEditors}
+    />
+  );
 
   // ── Aether: Activity bar at the top ─────────────────────────────────
   if (layoutMode === "aether") {
     return (
       <aside style={{ width }} className="flex shrink-0 flex-col border-r border-white/[0.05] bg-panel">
         <ActivityBar activeView={view} onSelect={onSelectView} onOpenSettings={onOpenSettings} vertical={false} />
-        <PanelContent
-          view={view} rootPath={rootPath} folderLabel={folderLabel}
-          actions={actions} expanded={expanded} onToggle={onToggle}
-          refreshNonce={refreshNonce} onNewFile={onNewFile} onNewFolder={onNewFolder}
-          onRefresh={onRefresh} onCollapseAll={onCollapseAll} onOpenPalette={_onOpenPalette}
-          onChangeWorkspace={onChangeWorkspace} onGoHome={onGoHome} onOpenDiff={onOpenDiff}
-          settingsSection={settingsSection} onSelectSettingsSection={onSelectSettingsSection}
-        />
+        {panel}
       </aside>
     );
   }
 
-  // ── VSCode: Activity bar on the left, settings at the bottom ────────
-  if (layoutMode === "vscode") {
-    return (
-      <div style={{ width }} className="flex shrink-0 border-r border-white/[0.05]">
-        <ActivityBar activeView={view} onSelect={onSelectView} onOpenSettings={onOpenSettings} vertical />
-        <aside className="flex min-w-0 flex-1 flex-col bg-panel">
-          <PanelContent
-            view={view} rootPath={rootPath} folderLabel={folderLabel}
-            actions={actions} expanded={expanded} onToggle={onToggle}
-            refreshNonce={refreshNonce} onNewFile={onNewFile} onNewFolder={onNewFolder}
-            onRefresh={onRefresh} onCollapseAll={onCollapseAll} onOpenPalette={_onOpenPalette}
-            onChangeWorkspace={onChangeWorkspace} onGoHome={onGoHome} onOpenDiff={onOpenDiff}
-            settingsSection={settingsSection} onSelectSettingsSection={onSelectSettingsSection}
-          />
-        </aside>
-      </div>
-    );
-  }
-
-  // ── Compact: Minimal icon strip, settings at bottom ────────────────
+  // ── VSCode / Compact: Activity bar on the left edge ─────────────────
   return (
     <div style={{ width }} className="flex shrink-0 border-r border-white/[0.05]">
-      <ActivityBar activeView={view} onSelect={onSelectView} onOpenSettings={onOpenSettings} vertical compact />
-      <aside className="flex min-w-0 flex-1 flex-col bg-panel">
-        <PanelContent
-          view={view} rootPath={rootPath} folderLabel={folderLabel}
-          actions={actions} expanded={expanded} onToggle={onToggle}
-          refreshNonce={refreshNonce} onNewFile={onNewFile} onNewFolder={onNewFolder}
-          onRefresh={onRefresh} onCollapseAll={onCollapseAll} onOpenPalette={_onOpenPalette}
-          onChangeWorkspace={onChangeWorkspace} onGoHome={onGoHome} onOpenDiff={onOpenDiff}
-          settingsSection={settingsSection} onSelectSettingsSection={onSelectSettingsSection}
-        />
-      </aside>
+      <ActivityBar
+        activeView={view}
+        onSelect={onSelectView}
+        onOpenSettings={onOpenSettings}
+        vertical
+        compact={layoutMode === "compact"}
+      />
+      <aside className="flex min-w-0 flex-1 flex-col bg-panel">{panel}</aside>
     </div>
   );
 });

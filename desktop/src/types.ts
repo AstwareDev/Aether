@@ -30,7 +30,6 @@ export interface UIIconProps {
 export type SvgComp = FC<SVGProps<SVGSVGElement>>;
 
 // ── Virtual URIs ──────────────────────────────────────────────────────
-export const SETTINGS_URI = "aether:settings";
 export type LayoutMode = "vscode" | "aether" | "compact";
 
 // ── lib/icons/aether.tsx ──────────────────────────────────────────────
@@ -197,6 +196,11 @@ export interface Settings {
   editorWordWrap: boolean;
   editorMinimap: boolean;
   editorLineNumbers: EditorLineNumbers;
+  explorerCompactFolders: boolean;
+  explorerAutoReveal: boolean;
+  explorerGitDecorations: boolean;
+  explorerOpenEditors: boolean;
+  explorerOpenEditorsExpanded: boolean;
 }
 
 // ── lib/fs.ts ─────────────────────────────────────────────────────────
@@ -274,7 +278,7 @@ export interface AiState {
 }
 
 // ── components/ActivityBar.tsx ────────────────────────────────────────
-export type ViewId = "explorer" | "search" | "scm" | "extensions" | "settings";
+export type ViewId = "explorer" | "search" | "scm" | "extensions";
 
 export interface ActivityBarItem {
   id: ViewId;
@@ -300,6 +304,8 @@ export interface FileGlyphProps {
 export interface OpenTab {
   path: string;
   dirty: boolean;
+  /** Overrides the name derived from the path — a browser tab's current host. */
+  label?: string;
 }
 
 export interface EditorTabsProps {
@@ -310,7 +316,49 @@ export interface EditorTabsProps {
   onReorder: (tabs: OpenTab[]) => void;
 }
 
+// ── components/OpenEditors.tsx ────────────────────────────────────────
+export interface OpenEditorsProps {
+  tabs: OpenTab[];
+  activePath: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onSelect: (path: string) => void;
+  onClose: (path: string) => void;
+  onCloseAll: () => void;
+}
+
+// ── components/BrowserView.tsx ────────────────────────────────────────
+export interface BrowserViewProps {
+  url: string;
+  onUrlChange?: (url: string) => void;
+}
+
 // ── components/FileTree.tsx ───────────────────────────────────────────
+
+/** One segment of a compacted folder chain (`src/lib/icons`). */
+export interface TreeSegment {
+  name: string;
+  path: string;
+}
+
+/** A single visible line of the flattened tree. */
+export interface TreeRow {
+  key: string;
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+  parentPath: string;
+  segments: TreeSegment[] | null;
+  expanded: boolean;
+}
+
+export type FsOperation =
+  | { kind: "create"; to: string; isDir: boolean }
+  | { kind: "copy"; from: string; to: string }
+  | { kind: "move"; from: string; to: string }
+  | { kind: "delete"; to: string; isDir: boolean; content: string | null };
+
 export interface TreeActions {
   activePath: string | null;
   onOpenFile: (path: string) => void;
@@ -327,26 +375,11 @@ export interface TreeActions {
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onMoveEntry: (sourcePath: string, targetDir: string) => void;
-}
-
-export interface InternalCtx extends TreeActions {
-  openMenu: (x: number, y: number, entry: DirEntry | null) => void;
-  rootPath: string;
-  expanded: Set<string>;
-  onToggle: (path: string) => void;
-  refreshNonce: number;
-  onChangeWorkspace: () => void;
-  onGoHome: () => void;
-  draggingPath: string | null;
-  setDraggingPath: (p: string | null) => void;
-  dragOverPath: string | null;
-  setDragOverPath: (p: string | null) => void;
-  selectedPaths: Set<string>;
-  setSelectedPaths: (paths: Set<string>) => void;
-  lastClickedPath: string | null;
-  setLastClickedPath: (p: string | null) => void;
-  clipboard: { paths: string[]; operation: "copy" | "cut" } | null;
-  setClipboard: (state: { paths: string[]; operation: "copy" | "cut" } | null) => void;
+  onRecord: (op: FsOperation) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export interface FileTreeProps {
@@ -354,24 +387,34 @@ export interface FileTreeProps {
   actions: TreeActions;
   expanded: Set<string>;
   onToggle: (path: string) => void;
+  onExpandPaths: (paths: string[]) => void;
   refreshNonce: number;
+  onRefresh: () => void;
   onChangeWorkspace: () => void;
   onGoHome: () => void;
+  onOpenSearch?: (scopePath: string) => void;
+  /** Folder the toolbar's New File/New Folder should target, tracking selection. */
+  onTargetDirChange?: (dir: string) => void;
+  onError?: (message: string) => void;
 }
 
 export interface MenuState {
   x: number;
   y: number;
-  entry: DirEntry | null;
+  row: TreeRow | null;
+  targetPath: string | null;
 }
 
-export interface MIProps {
+export interface MenuAction {
+  id: string;
   label: string;
   shortcut?: string;
-  onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
+  run: () => void;
 }
+
+export type MenuEntry = MenuAction | { id: string; separator: true };
 
 // ── components/SourceControl.tsx ───────────────────────────────────────
 export interface GitFile {
@@ -446,10 +489,13 @@ export interface CommitHistoryProps {
 
 // ── components/SettingsPanel.tsx ───────────────────────────────────────
 export interface SettingsPanelProps {
+  open: boolean;
   section: SettingsSection;
+  onSelectSection: (section: SettingsSection) => void;
+  onClose: () => void;
 }
 
-export type SettingsSection = "appearance" | "models" | "ai-tools" | "ai-config";
+export type SettingsSection = "appearance" | "explorer";
 
 // ── components/Breadcrumbs.tsx ─────────────────────────────────────────
 export interface BreadcrumbsProps {
@@ -477,19 +523,24 @@ export interface SidebarProps {
   actions: TreeActions;
   expanded: Set<string>;
   onToggle: (path: string) => void;
+  onExpandPaths: (paths: string[]) => void;
   refreshNonce: number;
   onNewFile: () => void;
   onNewFolder: () => void;
   onRefresh: () => void;
   onCollapseAll: () => void;
+  onOpenBrowser?: () => void;
   onOpenPalette: () => void;
   onSelectView: (id: ViewId) => void;
   onOpenSettings: () => void;
   onChangeWorkspace: () => void;
   onGoHome: () => void;
   onOpenDiff?: (filePath: string) => void;
-  settingsSection?: SettingsSection;
-  onSelectSettingsSection?: (section: SettingsSection) => void;
+  onOpenSearch?: (scopePath: string) => void;
+  onTargetDirChange?: (dir: string) => void;
+  onError?: (message: string) => void;
+  searchScope?: string | null;
+  openEditors?: OpenEditorsProps;
 }
 
 // ── components/StatusBar.tsx ──────────────────────────────────────────

@@ -91,6 +91,34 @@ export const ReplaceIcon = ({ size = 16, className }: UIIconProps) => (
   </svg>
 );
 
+export const BrowserIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" className={className}>
+    <circle cx="8" cy="8" r="6.2" />
+    <ellipse cx="8" cy="8" rx="2.6" ry="6.2" />
+    <path d="M2 6h12M2 10h12" />
+  </svg>
+);
+
+export const ArrowLeftIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M10 3L5 8l5 5" />
+  </svg>
+);
+
+export const ArrowRightIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M6 3l5 5-5 5" />
+  </svg>
+);
+
+export const ExternalLinkIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M9 2.5h4.5V7" />
+    <path d="M13.5 2.5L7.5 8.5" />
+    <path d="M12 9.5v3a1 1 0 01-1 1H3.5a1 1 0 01-1-1V5a1 1 0 011-1h3" />
+  </svg>
+);
+
 export const ReplaceAllIcon = ({ size = 16, className }: UIIconProps) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
     <path d="M2 2h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1zm-9 4.5h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1z"/>

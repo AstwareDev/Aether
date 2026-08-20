@@ -3,7 +3,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setSetting, useSetting } from "../lib/settings";
 import { SidebarIcon, TerminalIcon } from "../lib/icons/ui";
 import { MinimizeIcon, MaximizeIcon, RestoreIcon, TopCloseIcon } from "../icons";
-import { openAiIdeWindow } from "../lib/windows";
 import type { TopbarProps } from "../types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,20 +40,6 @@ export default function Topbar({ hasWorkspace }: TopbarProps) {
       </div>
 
       <div data-tauri-drag-region className="flex-1 h-full" />
-
-      <div className="flex h-full items-center pr-1">
-        <button
-          type="button"
-          onClick={() => openAiIdeWindow()}
-          aria-label="Open AI Chat"
-          title="Open AI Chat"
-          className="flex h-6 w-7 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.08] hover:text-white"
-        >
-          <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-        </button>
-      </div>
 
       {hasWorkspace && (
         <div className="flex h-full items-center pr-1">

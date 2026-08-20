@@ -1,0 +1,139 @@
+/* Fit MDXEditor's dark theme to Aether's chrome. The library exposes its
+   palette as custom properties, so this retunes tokens rather than fighting
+   its internal selectors. */
+
+.aether-rte {
+  height: 100%;
+}
+
+.aether-rte .mdxeditor {
+  --accentBase: #0a0a0a;
+  --accentBgSubtle: rgba(255, 255, 255, 0.03);
+  --accentBg: rgba(255, 255, 255, 0.06);
+  --accentBgHover: rgba(255, 255, 255, 0.09);
+  --accentBgActive: rgba(255, 255, 255, 0.12);
+  --accentLine: rgba(255, 255, 255, 0.08);
+  --accentBorder: rgba(255, 255, 255, 0.12);
+  --accentBorderHover: rgba(255, 255, 255, 0.2);
+  --accentSolid: #ffffff;
+  --accentSolidHover: #ffffff;
+  --accentText: #fafafa;
+  --accentTextContrast: #0a0a0a;
+
+  --baseBase: #0a0a0a;
+  --baseBgSubtle: #0a0a0a;
+  --baseBg: #0a0a0a;
+  --baseBgHover: rgba(255, 255, 255, 0.04);
+  --baseBgActive: rgba(255, 255, 255, 0.07);
+  --baseLine: rgba(255, 255, 255, 0.06);
+  --baseBorder: rgba(255, 255, 255, 0.08);
+  --baseBorderHover: rgba(255, 255, 255, 0.16);
+  --baseSolid: rgba(255, 255, 255, 0.14);
+  --baseText: #d4d4d8;
+  --baseTextContrast: #fafafa;
+
+  --basePageBg: #0a0a0a;
+  --font-body: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  background: var(--color-canvas);
+  color: #d4d4d8;
+}
+
+/* Toolbar reads as editor chrome, not a web app ribbon. */
+.aether-rte .mdxeditor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--color-canvas);
+  padding: 4px 8px;
+  gap: 2px;
+}
+
+.aether-rte .mdxeditor-toolbar button,
+.aether-rte .mdxeditor-toolbar [role="combobox"] {
+  color: #a1a1aa;
+}
+
+.aether-rte .mdxeditor-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fafafa;
+}
+
+.aether-rte .mdxeditor-toolbar button[data-state="on"] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Document body matches the preview's measure and rhythm. */
+.aether-rte .aether-rte-body {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 6rem;
+  font-size: 15px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.aether-rte .aether-rte-body h1,
+.aether-rte .aether-rte-body h2,
+.aether-rte .aether-rte-body h3,
+.aether-rte .aether-rte-body h4,
+.aether-rte .aether-rte-body h5,
+.aether-rte .aether-rte-body h6 {
+  color: #fafafa;
+  font-weight: 600;
+}
+
+.aether-rte .aether-rte-body h1 {
+  font-size: 2em;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.3em;
+}
+
+.aether-rte .aether-rte-body h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.3em;
+}
+
+.aether-rte .aether-rte-body a {
+  color: #60a5fa;
+}
+
+.aether-rte .aether-rte-body code {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.2em 0.4em;
+  font-size: 0.9em;
+  color: #fca5a5;
+  font-family: var(--font-mono);
+}
+
+.aether-rte .aether-rte-body blockquote {
+  border-left: 4px solid rgba(255, 255, 255, 0.2);
+  padding-left: 1em;
+  margin-left: 0;
+  color: #a1a1aa;
+  font-style: italic;
+}
+
+.aether-rte .aether-rte-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.aether-rte .aether-rte-body th,
+.aether-rte .aether-rte-body td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5em 0.75em;
+}
+
+.aether-rte .aether-rte-body th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fafafa;
+}
