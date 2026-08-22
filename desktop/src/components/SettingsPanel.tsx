@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import AppearanceSection from "./settings/AppearanceSection";
 import ExplorerSection from "./settings/ExplorerSection";
+import SourceControlSection from "./settings/SourceControlSection";
 import { SETTINGS_SECTIONS, settingsSectionMeta } from "../lib/settings";
 import { SectionIcon } from "../icons";
 import { CloseGlyph } from "../icons";
@@ -105,6 +106,7 @@ export default function SettingsPanel({ open, section, onSelectSection, onClose 
 
                   {section === "appearance" && <AppearanceSection />}
                   {section === "explorer" && <ExplorerSection />}
+                  {section === "source-control" && <SourceControlSection />}
                 </motion.div>
               </div>
             </section>

@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { AnimatePresence, motion, Reorder } from "motion/react";
 import { FileTypeIcon } from "../lib/icons";
-import { BrowserIcon } from "../lib/icons/ui";
+import { BrowserIcon, SplitIcon } from "../lib/icons/ui";
+import Favicon from "./Favicon";
 import { CloseGlyph, DiffGlyph } from "../icons";
 import { baseName } from "../lib/fs";
 import { browserLabel, isBrowserPath, urlFromBrowserPath } from "../lib/browser";
@@ -23,17 +24,29 @@ function tabLabel(path: string): string {
   return baseName(path);
 }
 
-export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, onReorder }: EditorTabsProps) {
+export default memo(function EditorTabs({
+  tabs,
+  activePath,
+  onSelect,
+  onClose,
+  onReorder,
+  onSplit,
+  onCloseGroup,
+  onTabDragStart,
+  onTabDrag,
+  onTabDragEnd,
+}: EditorTabsProps) {
   return (
-    <Reorder.Group
-      as="div"
-      axis="x"
-      values={tabs}
-      onReorder={onReorder}
-      role="tablist"
-      aria-label="Open editors"
-      className="scroll-thin flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-white/[0.06] bg-abyss"
-    >
+    <div className="flex h-9 shrink-0 items-stretch border-b border-white/[0.06] bg-abyss">
+      <Reorder.Group
+        as="div"
+        axis="x"
+        values={tabs}
+        onReorder={onReorder}
+        role="tablist"
+        aria-label="Open editors"
+        className="scroll-thin flex min-w-0 flex-1 items-stretch overflow-x-auto"
+      >
       <AnimatePresence initial={false}>
         {tabs.map((tab) => {
           const active = tab.path === activePath;
@@ -62,6 +75,9 @@ export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, o
               onAuxClick={(e) => {
                 if (e.button === 1) onClose(tab.path);
               }}
+              onDragStart={() => onTabDragStart?.(tab.path)}
+              onDrag={(_e, info) => onTabDrag?.(tab.path, info.point)}
+              onDragEnd={(_e, info) => onTabDragEnd?.(tab.path, info.point)}
               title={browser ? urlFromBrowserPath(tab.path) : diff ? realPathFromDiff(tab.path) : tab.path}
               className={`group relative flex min-w-0 max-w-[220px] shrink-0 cursor-pointer items-center gap-2 border-r border-white/[0.05] px-3 text-[13px] transition-colors ${
                 active ? "bg-canvas text-white" : "text-zinc-500 hover:bg-white/[0.02] hover:text-zinc-300"
@@ -74,7 +90,17 @@ export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, o
                   transition={{ type: "spring", stiffness: 550, damping: 42 }}
                 />
               )}
-              {browser ? <BrowserIcon size={14} className="shrink-0" /> : diff ? <DiffGlyph /> : <FileTypeIcon name={baseName(tab.path)} className="shrink-0" />}
+              {browser ? (
+                tab.icon ? (
+                  <Favicon src={tab.icon} size={14} className="shrink-0" />
+                ) : (
+                  <BrowserIcon size={14} className="shrink-0" />
+                )
+              ) : diff ? (
+                <DiffGlyph />
+              ) : (
+                <FileTypeIcon name={baseName(tab.path)} className="shrink-0" />
+              )}
               <span className="truncate">{displayName}</span>
               {diff && <span className="shrink-0 text-[10px] text-sky-500">diff</span>}
               <button
@@ -94,6 +120,29 @@ export default memo(function EditorTabs({ tabs, activePath, onSelect, onClose, o
           );
         })}
       </AnimatePresence>
-    </Reorder.Group>
+      </Reorder.Group>
+      {onSplit && (
+        <button
+          type="button"
+          onClick={onSplit}
+          title="Split Editor Right"
+          aria-label="Split Editor Right"
+          className="flex w-9 shrink-0 items-center justify-center border-l border-white/[0.05] text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300"
+        >
+          <SplitIcon size={14} />
+        </button>
+      )}
+      {onCloseGroup && (
+        <button
+          type="button"
+          onClick={onCloseGroup}
+          title="Close Group"
+          aria-label="Close Group"
+          className="flex w-9 shrink-0 items-center justify-center border-l border-white/[0.05] text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300"
+        >
+          <CloseGlyph size={12} />
+        </button>
+      )}
+    </div>
   );
 });

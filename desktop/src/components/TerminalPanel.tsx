@@ -10,7 +10,7 @@ const SHELL_LABEL: Record<ShellKind, string> = {
   cmd: "Command Prompt",
 };
 
-export default function TerminalPanel({ rootPath, visible }: TerminalPanelProps) {
+export default function TerminalPanel({ rootPath, visible, onOpenUrl }: TerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -218,7 +218,12 @@ export default function TerminalPanel({ rootPath, visible }: TerminalPanelProps)
       <div className="min-h-0 flex-1">
         {tabs.map((tab) => (
           <div key={tab.id} className={tab.id === activeId ? "h-full w-full" : "hidden"}>
-            <Terminal rootPath={rootPath} shell={tab.shell} visible={visible && tab.id === activeId} />
+            <Terminal
+              rootPath={rootPath}
+              shell={tab.shell}
+              visible={visible && tab.id === activeId}
+              onOpenUrl={onOpenUrl}
+            />
           </div>
         ))}
       </div>

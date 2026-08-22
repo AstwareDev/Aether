@@ -1,5 +1,5 @@
 import { createStore } from "./store";
-import type { EditorLineNumbers, LayoutMode, Settings, SettingsSection } from "../types";
+import type { EditorLineNumbers, LayoutMode, ScmView, ScmViewSwitcher, Settings, SettingsSection } from "../types";
 
 const DEFAULTS: Settings = {
   iconTheme: "aether",
@@ -17,13 +17,23 @@ const DEFAULTS: Settings = {
   explorerGitDecorations: true,
   explorerOpenEditors: true,
   explorerOpenEditorsExpanded: false,
+  scmViewSwitcher: "dropdown",
+  scmDefaultView: "changes",
 };
 
 export const SIDEBAR_WIDTH_RANGE = { min: 180, max: 480 } as const;
 export const EDITOR_FONT_SIZE_RANGE = { min: 10, max: 24 } as const;
 
+export const SCM_VIEW_LABELS: Record<ScmView, string> = {
+  changes: "Changes",
+  history: "History",
+  agent: "Agent Review",
+};
+
 const LAYOUT_MODES: LayoutMode[] = ["aether", "vscode", "compact"];
 const LINE_NUMBER_MODES: EditorLineNumbers[] = ["on", "relative", "off"];
+const SCM_VIEWS: ScmView[] = ["changes", "history", "agent"];
+const SCM_VIEW_SWITCHERS: ScmViewSwitcher[] = ["dropdown", "tabs"];
 
 const clamp = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === "number" ? value : Number(value);
@@ -78,6 +88,8 @@ function hydrate(raw: unknown, defaults: Settings): Settings {
       stored.explorerOpenEditorsExpanded,
       defaults.explorerOpenEditorsExpanded,
     ),
+    scmViewSwitcher: oneOf(stored.scmViewSwitcher, SCM_VIEW_SWITCHERS, defaults.scmViewSwitcher),
+    scmDefaultView: oneOf(stored.scmDefaultView, SCM_VIEWS, defaults.scmDefaultView),
   };
 }
 
@@ -103,6 +115,11 @@ export const SETTINGS_SECTIONS: {
     id: "explorer",
     label: "Explorer",
     description: "How the file tree presents your workspace, and what it surfaces alongside it.",
+  },
+  {
+    id: "source-control",
+    label: "Source Control",
+    description: "How the Source Control panel switches between Changes, History, and Agent Review.",
   },
 ];
 

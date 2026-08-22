@@ -124,3 +124,20 @@ export const ReplaceAllIcon = ({ size = 16, className }: UIIconProps) => (
     <path d="M2 2h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1zm-9 4.5h8v1h-8v-1zm0 2h8v1h-8v-1zm0 2h5v1h-5v-1zm9-1.5v3h1v-3h1l-1.5-1.5-1.5 1.5h1z"/>
   </svg>
 );
+
+export const InspectIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+    <path d="M6.5 2.5v11" />
+    <path d="M9 6l2 2-2 2" />
+  </svg>
+);
+
+export const PickerIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M2.5 6V3.5a1 1 0 011-1H6" />
+    <path d="M10 2.5h2.5a1 1 0 011 1V6" />
+    <path d="M2.5 10v2.5a1 1 0 001 1H6" />
+    <path d="M7.5 7.5l5.5 2-2.2.9-.9 2.2-2.4-5.1z" fill="currentColor" stroke="none" />
+  </svg>
+);

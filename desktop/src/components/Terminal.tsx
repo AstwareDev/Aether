@@ -5,8 +5,18 @@ import "@xterm/xterm/css/xterm.css";
 import { killPty, resizePty, spawnPty, writePty } from "../lib/pty";
 import type { TerminalProps } from "../types";
 
-export default function Terminal({ rootPath, shell, visible }: TerminalProps) {
+/**
+ * Trailing punctuation is far more often a sentence ending than part of the
+ * address, so it is left out of the match.
+ */
+const URL_PATTERN = /https?:\/\/[^\s"'<>`\]]+[^\s"'<>`\].,;:!?)]/g;
+
+export default function Terminal({ rootPath, shell, visible, onOpenUrl }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // The terminal is built once; reading the handler from a ref keeps a new
+  // callback from tearing it down.
+  const openUrlRef = useRef(onOpenUrl);
+  openUrlRef.current = onOpenUrl;
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
 
@@ -72,6 +82,33 @@ export default function Terminal({ rootPath, shell, visible }: TerminalProps) {
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       void resizePty(id, cols, rows);
     });
+    // Dev servers print their address on startup; this makes it a link that
+    // opens in the pane next door rather than an external browser.
+    const linkDisposable = term.registerLinkProvider({
+      provideLinks(lineNumber, callback) {
+        const line = term.buffer.active.getLine(lineNumber - 1);
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+        const text = line.translateToString(true);
+        const links = [];
+        for (const match of text.matchAll(URL_PATTERN)) {
+          const start = match.index ?? 0;
+          const url = match[0];
+          links.push({
+            range: {
+              start: { x: start + 1, y: lineNumber },
+              end: { x: start + url.length, y: lineNumber },
+            },
+            text: url,
+            activate: () => openUrlRef.current?.(url),
+          });
+        }
+        callback(links.length ? links : undefined);
+      },
+    });
+
     const resizeObserver = new ResizeObserver(() => fitAddon.fit());
     resizeObserver.observe(container);
 
@@ -82,6 +119,7 @@ export default function Terminal({ rootPath, shell, visible }: TerminalProps) {
       resizeObserver.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
+      linkDisposable.dispose();
       term.dispose();
       void killPty(id);
     };

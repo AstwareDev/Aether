@@ -188,6 +188,15 @@ export function SectionIcon({ section }: { section: SettingsSection }) {
           />
         </svg>
       );
+    case "source-control":
+      return (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <circle cx="4" cy="3.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="4" cy="12.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="12" cy="12.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M4 5v6M4 6.5c0 3 2.5 3 8 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
   }
 }
 

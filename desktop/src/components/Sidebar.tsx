@@ -1,10 +1,14 @@
-import { memo } from "react";
+import { lazy, memo, Suspense } from "react";
 import { motion } from "motion/react";
 import ActivityBar from "./ActivityBar";
 import FileTree from "./FileTree";
-import SourceControl from "./SourceControl";
-import Search from "./Search";
 import OpenEditors from "./OpenEditors";
+
+// Neither view is shown on first paint (Explorer is the default), so their
+// heavier dependencies — SourceControl pulls in the AI provider layer,
+// Search its own worker plumbing — stay out of the startup bundle.
+const SourceControl = lazy(() => import("./SourceControl"));
+const Search = lazy(() => import("./Search"));
 import { useSetting } from "../lib/settings";
 import {
   NewFileIcon,
@@ -59,6 +63,7 @@ function PanelContent({
   onGoHome,
   onOpenDiff,
   onOpenSearch,
+  onOpenInBrowser,
   onTargetDirChange,
   onError,
   searchScope,
@@ -82,6 +87,7 @@ function PanelContent({
   onGoHome: () => void;
   onOpenDiff?: (filePath: string) => void;
   onOpenSearch?: (scopePath: string) => void;
+  onOpenInBrowser?: (filePath: string) => void;
   onTargetDirChange?: (dir: string) => void;
   onError?: (message: string) => void;
   searchScope?: string | null;
@@ -115,14 +121,19 @@ function PanelContent({
         onChangeWorkspace={onChangeWorkspace}
         onGoHome={onGoHome}
         onOpenSearch={onOpenSearch}
+        onOpenInBrowser={onOpenInBrowser}
         onTargetDirChange={onTargetDirChange}
         onError={onError}
       />
     </div>
   ) : view === "search" ? (
-    <Search rootPath={rootPath} scope={searchScope ?? null} onOpenFile={actions.onOpenFile} />
+    <Suspense fallback={null}>
+      <Search rootPath={rootPath} scope={searchScope ?? null} onOpenFile={actions.onOpenFile} />
+    </Suspense>
   ) : view === "scm" ? (
-    <SourceControl rootPath={rootPath} onOpenDiff={onOpenDiff} />
+    <Suspense fallback={null}>
+      <SourceControl rootPath={rootPath} onOpenDiff={onOpenDiff} />
+    </Suspense>
   ) : (
     <Placeholder Icon={ExtensionsIcon} title="Extensions" body="An extension marketplace is planned." />
   );
@@ -152,6 +163,7 @@ export default memo(function Sidebar(props: SidebarProps) {
       onGoHome={props.onGoHome}
       onOpenDiff={props.onOpenDiff}
       onOpenSearch={props.onOpenSearch}
+      onOpenInBrowser={props.onOpenInBrowser}
       onTargetDirChange={props.onTargetDirChange}
       onError={props.onError}
       searchScope={props.searchScope}

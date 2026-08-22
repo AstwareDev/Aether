@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the app's own webview. Scoped to the webview rather than the window because the main window also hosts the browser pane's child webviews, and a `windows` entry would grant those the app's commands as well.",
+  "webviews": ["main"],
   "permissions": [
     "core:default",
     "opener:default",

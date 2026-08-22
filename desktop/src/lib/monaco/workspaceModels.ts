@@ -19,6 +19,35 @@ export function isWorkspaceSourceExtension(path: string): boolean {
   return SOURCE_EXTENSIONS.has(extensionOf(path));
 }
 
+// Non-source models can now be displayed by more than one editor group at
+// once (split editors), so ownership can't be "whichever CodeEditor instance
+// created it" any more — it's refcounted, and only disposed once every
+// instance showing it has let go. Source-extension models are exempt: their
+// lifecycle is owned entirely by syncWorkspaceModels above.
+const refCounts = new Map<string, number>();
+
+export function claimModel(path: string, initialValue: string, language: string): monaco.editor.ITextModel {
+  const uri = toUri(path);
+  const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(initialValue, language, uri);
+  if (!isWorkspaceSourceExtension(path)) {
+    const key = uri.toString();
+    refCounts.set(key, (refCounts.get(key) ?? 0) + 1);
+  }
+  return model;
+}
+
+export function releaseModel(path: string): void {
+  if (isWorkspaceSourceExtension(path)) return;
+  const key = toUri(path).toString();
+  const count = (refCounts.get(key) ?? 0) - 1;
+  if (count > 0) {
+    refCounts.set(key, count);
+    return;
+  }
+  refCounts.delete(key);
+  monaco.editor.getModel(toUri(path))?.dispose();
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

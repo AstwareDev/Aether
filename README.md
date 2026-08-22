@@ -41,6 +41,7 @@ Rewritten to match VS Code's tree, and in places to go past it.
 - **React snippets** — `rfc`, `rfce`, `rafce`, `rafc`, `rtsc`, `rcc`, `useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`, `imr`, `imd`, `clg` and friends, with the component named after the file
 - **Emmet** in JSX, HTML and CSS
 - **Cross-file IntelliSense** for JS/TS — workspace files are loaded as background Monaco models so completions and go-to-definition work without opening them first
+- **Split editors** — `Ctrl+\`, the split button on a tab strip, or dragging a tab to a pane's left/right edge opens a new group; each group keeps its own tabs and active file, models are shared (and refcounted) across groups so the same file stays in sync everywhere it's open, and a group closes itself once its last tab does
 - Editor tabs with drag-reorder and dirty-state indicators
 - Path breadcrumbs, status bar with cursor position and language
 - Configurable font, size, word wrap, minimap, and line numbers (absolute / relative / off)
@@ -113,10 +114,10 @@ This is the honest list. Most of it is the layer that makes an editor good at *w
 - **AI context selection is naive** — it can't yet reason about which files actually matter to a request, because there's no dependency graph to ask.
 
 ### Editor
-- **No split editors or editor groups** — one editor at a time, no side-by-side
 - **No preview tabs or tab pinning** — every open is a permanent tab
 - No debugging (DAP), no task runner
 - Large files (>5 MB) are refused rather than opened read-only or streamed
+- Split editor groups are laid out in a single row with no resize handle between them
 
 ### Filesystem
 - Refresh is **polling-based** (visible folders every 4s, plus on focus). It should be a native filesystem watcher — cheaper, instant, and correct for changes outside the visible set.
@@ -155,7 +156,6 @@ Roughly in priority order:
 - [ ] **Problems panel** and diagnostics surface
 - [ ] **Native filesystem watcher** to replace polling
 - [ ] `settings.json` + `keybindings.json`, with remappable keys
-- [ ] Split editors / editor groups
 - [ ] Outline view and symbol breadcrumbs
 - [ ] Per-hunk staging and a better diff viewer
 - [ ] Delete to OS trash

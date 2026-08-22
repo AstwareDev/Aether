@@ -3,7 +3,7 @@ import { monaco } from "../lib/monaco/setup";
 import { languageForPath } from "../lib/monaco/editorLanguage";
 import { installAiEdit } from "../lib/monaco/aiEdit";
 import { ReviewAnnotation, ensureReviewStyles } from "../lib/monaco/reviewAnnotation";
-import { toUri, isWorkspaceSourceExtension } from "../lib/monaco/workspaceModels";
+import { claimModel, releaseModel } from "../lib/monaco/workspaceModels";
 import { useSetting } from "../lib/settings";
 import type { CodeEditorProps, ReviewIssue } from "../types";
 
@@ -118,7 +118,7 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
       annotationRef.current = null;
       editor.dispose();
       editorRef.current = null;
-      for (const model of modelsRef.current.values()) model.dispose();
+      for (const p of modelsRef.current.keys()) releaseModel(p);
       modelsRef.current.clear();
       viewStatesRef.current.clear();
       currentPathRef.current = null;
@@ -148,8 +148,7 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
 
     let model = modelsRef.current.get(path);
     if (!model) {
-      const uri = toUri(path);
-      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(value, languageForPath(path), uri);
+      model = claimModel(path, value, languageForPath(path));
       modelsRef.current.set(path, model);
     }
     editor.setModel(model);
@@ -191,9 +190,9 @@ export default function CodeEditor({ path, value, onChange, onSave, onCursor, op
   useEffect(() => {
     if (!openPaths) return;
     const open = new Set(openPaths);
-    for (const [p, model] of modelsRef.current) {
+    for (const p of modelsRef.current.keys()) {
       if (open.has(p)) continue;
-      if (!isWorkspaceSourceExtension(p)) model.dispose();
+      releaseModel(p);
       modelsRef.current.delete(p);
       viewStatesRef.current.delete(p);
     }

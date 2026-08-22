@@ -1,0 +1,133 @@
+/*
+ * Aether's palette and typography, mapped onto the DevTools design tokens.
+ *
+ * Injected into the front-end as it is served. Everything below is a custom
+ * property on the root element, which is what makes it reach the whole UI:
+ * custom properties inherit through shadow boundaries, and almost all of
+ * DevTools lives in shadow DOM.
+ *
+ * `!important` because DevTools defines these same tokens on `:root` from a
+ * stylesheet it adopts at runtime — after this one, and at equal specificity.
+ * The side effect is that its own light/dark switching stops applying, which is
+ * the intent: this is a panel in a dark editor, not a browser window.
+ *
+ * Token names drift between Chromium versions. Unknown properties cost nothing,
+ * so this covers more than any one version defines.
+ */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/aether/fonts/inter.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("/aether/fonts/jetbrains-mono.woff2") format("woff2-variations");
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — near-black, a shade apart so panels read as separate. */
+  --sys-color-base: #0a0a0a !important;
+  --sys-color-cdt-base: #0a0a0a !important;
+  --sys-color-cdt-base-container: #0a0a0a !important;
+  --sys-color-base-container: #050505 !important;
+  --sys-color-base-container-elevated: #0f0f0f !important;
+  --sys-color-surface: #0a0a0a !important;
+  --sys-color-surface1: #0c0c0c !important;
+  --sys-color-surface2: #101010 !important;
+  --sys-color-surface3: #141414 !important;
+  --sys-color-surface4: #171717 !important;
+  --sys-color-surface5: #1a1a1a !important;
+  --sys-color-surface-variant: #050505 !important;
+  --sys-color-surface-yellow: #1a1508 !important;
+  --sys-color-surface-error: #1a0c0c !important;
+  --sys-color-surface-green: #081a10 !important;
+  --sys-color-inverse-surface: #e6e6e6 !important;
+  --sys-color-on-inverse-surface: #0a0a0a !important;
+
+  /* Text. */
+  --sys-color-on-base: #e6e6e6 !important;
+  --sys-color-on-surface: #e6e6e6 !important;
+  --sys-color-on-surface-subtle: #8a8a8a !important;
+  --sys-color-on-surface-variant: #a3a3a3 !important;
+  --sys-color-token-subtle: #8a8a8a !important;
+  --sys-color-state-disabled: rgba(255, 255, 255, 0.28) !important;
+
+  /* Lines. */
+  --sys-color-divider: rgba(255, 255, 255, 0.08) !important;
+  --sys-color-on-base-divider: rgba(255, 255, 255, 0.08) !important;
+  --sys-color-divider-on-tonal-container: rgba(255, 255, 255, 0.08) !important;
+  --sys-color-divider-prominent: rgba(255, 255, 255, 0.14) !important;
+  --sys-color-neutral-outline: rgba(255, 255, 255, 0.14) !important;
+  --sys-color-tonal-outline: rgba(255, 255, 255, 0.14) !important;
+  --sys-color-outline: rgba(255, 255, 255, 0.14) !important;
+
+  /* Accent — Aether is monochrome, so the accent is plain white. */
+  --sys-color-primary: #ffffff !important;
+  --sys-color-primary-bright: #ffffff !important;
+  --sys-color-on-primary: #000000 !important;
+  --sys-color-tonal-container: rgba(255, 255, 255, 0.1) !important;
+  --sys-color-on-tonal-container: #ffffff !important;
+  --sys-color-secondary: #cccccc !important;
+  --sys-color-on-secondary: #000000 !important;
+
+  /* Interaction. */
+  --sys-color-state-hover-on-subtle: rgba(255, 255, 255, 0.06) !important;
+  --sys-color-state-hover-on-prominent: rgba(0, 0, 0, 0.08) !important;
+  --sys-color-state-ripple-neutral-on-subtle: rgba(255, 255, 255, 0.1) !important;
+  --sys-color-state-ripple-neutral-on-prominent: rgba(0, 0, 0, 0.12) !important;
+  --sys-color-state-focus-ring: rgba(255, 255, 255, 0.28) !important;
+  --sys-color-state-focus-highlight: rgba(255, 255, 255, 0.06) !important;
+  --sys-color-state-header-hover: rgba(255, 255, 255, 0.06) !important;
+  --sys-color-state-on-header-hover: rgba(255, 255, 255, 0.06) !important;
+
+  /* Typography. */
+  --default-font-family: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", sans-serif !important;
+  --source-code-font-family: "JetBrains Mono Variable", ui-monospace, Consolas, monospace !important;
+  --monospace-font-family: "JetBrains Mono Variable", ui-monospace, Consolas, monospace !important;
+  --source-code-font-size: 12px !important;
+  --monospace-font-size: 12px !important;
+}
+
+/*
+ * DevTools sets these families directly in a few places rather than through the
+ * tokens above, so the same two faces are named again here.
+ */
+body,
+.widget,
+.toolbar,
+.tabbed-pane-header-tab {
+  font-family: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", sans-serif !important;
+}
+
+.monospace,
+.source-code,
+.CodeMirror,
+.cm-editor,
+.console-message-text {
+  font-family: "JetBrains Mono Variable", ui-monospace, Consolas, monospace !important;
+}
+
+/*
+ * The screencast toggle mirrors the page into a strip of the panel, which is of
+ * no use when the page itself is already sitting right beside it.
+ *
+ * Matched loosely because the button's markup has changed shape more than once
+ * across Chromium versions - it has been a `button`, a `div[role=button]` and a
+ * `devtools-button`, labelled through `aria-label`, `title` or `jslogcontext`.
+ */
+[aria-label*="screencast" i],
+[title*="screencast" i],
+[jslogcontext*="screencast" i],
+.screencast,
+.screencast-view {
+  display: none !important;
+}

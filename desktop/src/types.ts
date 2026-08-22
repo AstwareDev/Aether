@@ -184,6 +184,8 @@ export interface CompletionOptions {
 
 // ── lib/settings.ts ───────────────────────────────────────────────────
 export type EditorLineNumbers = "on" | "relative" | "off";
+export type ScmView = "changes" | "history" | "agent";
+export type ScmViewSwitcher = "dropdown" | "tabs";
 
 export interface Settings {
   iconTheme: string;
@@ -201,6 +203,8 @@ export interface Settings {
   explorerGitDecorations: boolean;
   explorerOpenEditors: boolean;
   explorerOpenEditorsExpanded: boolean;
+  scmViewSwitcher: ScmViewSwitcher;
+  scmDefaultView: ScmView;
 }
 
 // ── lib/fs.ts ─────────────────────────────────────────────────────────
@@ -306,6 +310,8 @@ export interface OpenTab {
   dirty: boolean;
   /** Overrides the name derived from the path — a browser tab's current host. */
   label?: string;
+  /** Favicon of the page a browser tab is showing. */
+  icon?: string | null;
 }
 
 export interface EditorTabsProps {
@@ -314,23 +320,171 @@ export interface EditorTabsProps {
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
   onReorder: (tabs: OpenTab[]) => void;
+  /** Shown as a trailing toolbar button when set — opens a new editor group to the right. */
+  onSplit?: () => void;
+  /** Shown as a trailing toolbar button when set — closes every tab in this group. */
+  onCloseGroup?: () => void;
+  /** Dragging a tab past a pane's edge splits it off — these report the drag so Workspace can show the drop overlay and perform the move. `point` is viewport (client) coordinates. */
+  onTabDragStart?: (path: string) => void;
+  onTabDrag?: (path: string, point: { x: number; y: number }) => void;
+  onTabDragEnd?: (path: string, point: { x: number; y: number }) => void;
+}
+
+// ── components/Workspace.tsx: editor groups ─────────────────────────────
+/** One split pane of the editor area — its own tab strip and active file. */
+export interface EditorGroup {
+  id: string;
+  openPaths: string[];
+  activePath: string | null;
+}
+
+/** Which edge of a group pane a dragged tab is currently hovering, if any — "move" means the pane's middle (join that group instead of splitting). */
+export interface DropZone {
+  groupId: string;
+  side: "left" | "right" | "move";
 }
 
 // ── components/OpenEditors.tsx ────────────────────────────────────────
-export interface OpenEditorsProps {
+export interface OpenEditorsGroup {
+  id: string;
   tabs: OpenTab[];
+}
+
+export interface OpenEditorsProps {
+  groups: OpenEditorsGroup[];
+  /** Only meaningful when there's more than one group — labels the focused section. */
+  activeGroupId: string;
   activePath: string | null;
   expanded: boolean;
   onToggleExpanded: () => void;
-  onSelect: (path: string) => void;
-  onClose: (path: string) => void;
+  onSelect: (path: string, groupId: string) => void;
+  onClose: (path: string, groupId: string) => void;
   onCloseAll: () => void;
+  /** Dropping a row (dragged from here, or from an editor pane) onto a group section moves it there. */
+  onMoveToGroup: (path: string, groupId: string) => void;
+}
+
+// ── components/BrowserView.tsx ────────────────────────────────────────
+// ── lib/browserHost.ts ────────────────────────────────────────────────
+
+/** Logical (CSS) pixels relative to the window client area. */
+export interface BrowserViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** One step of the inspector's ancestor/child navigation. */
+export interface BrowserNodeRef {
+  path: string;
+  label: string;
+}
+
+/** A CSS rule that applies to the inspected element. */
+export interface BrowserCssRule {
+  selector: string;
+  text: string;
+  origin: string;
+}
+
+/** Framework the element came from, when the page exposes one. */
+export interface BrowserComponentInfo {
+  framework: string;
+  /** Outermost component first. */
+  stack: string[];
+  props: [string, string][];
+  /** `file:line`, only available in some development builds. */
+  source: string;
+}
+
+/** A snapshot of an inspected element, as the probe sees it. */
+export interface BrowserElement {
+  path: string;
+  /** Shortest selector that still identifies the element on its own. */
+  selector: string;
+  pageUrl: string;
+  pageTitle: string;
+  component: BrowserComponentInfo;
+  label: string;
+  tag: string;
+  id: string;
+  classes: string[];
+  attrs: [string, string][];
+  text: string;
+  html: string;
+  css: BrowserCssRule[];
+  rect: { x: number; y: number; width: number; height: number };
+  box: { margin: number[]; border: number[]; padding: number[] };
+  styles: [string, string][];
+  ancestors: BrowserNodeRef[];
+  children: BrowserNodeRef[];
+}
+
+/** Reported by the probe injected into the page — untrusted remote data. */
+export type BrowserSignal =
+  | { t: "newdoc"; url: string; time: number }
+  | { t: "nav"; url: string }
+  | { t: "meta"; url: string; title: string; icon: string | null; time: number }
+  | { t: "inspect"; active: boolean; time: number }
+  | ({ t: "pick"; time: number } & BrowserElement);
+
+/** Pane chrome that outlives the component, like the open inspector. */
+export interface BrowserPaneUi {
+  devtoolsOpen: boolean;
+  /** Logical pixels; the inspector webview is sized to match. */
+  devtoolsWidth: number;
+}
+
+/** History of one pane, kept alive across tab switches with the webview it describes. */
+export interface BrowserNavState {
+  stack: string[];
+  cursor: number;
+}
+
+/** What a page told us about itself, for the tab strip. */
+export interface BrowserPageMeta {
+  url: string;
+  title: string;
+  icon: string | null;
 }
 
 // ── components/BrowserView.tsx ────────────────────────────────────────
 export interface BrowserViewProps {
+  /** Tab identity — the pane's native webview is keyed off this. */
+  viewKey: string;
   url: string;
+  /** False while another tab or a modal is on top; the native view is OS-level and would paint over it. */
+  visible: boolean;
   onUrlChange?: (url: string) => void;
+  onMetaChange?: (meta: BrowserPageMeta) => void;
+}
+
+// ── components/BrowserStartPage.tsx ───────────────────────────────────
+export interface BrowserRecent {
+  url: string;
+  title: string;
+  icon?: string;
+}
+
+export interface BrowserStartPageProps {
+  recents: BrowserRecent[];
+  onNavigate: (input: string) => void;
+}
+
+// ── components/BrowserErrorPage.tsx ───────────────────────────────────
+export interface BrowserErrorPageProps {
+  url: string;
+  message: string;
+  onRetry: () => void;
+  onOpenExternally: () => void;
+}
+
+// ── components/Favicon.tsx ────────────────────────────────────────────
+export interface FaviconProps {
+  src?: string;
+  size?: number;
+  className?: string;
 }
 
 // ── components/FileTree.tsx ───────────────────────────────────────────
@@ -393,6 +547,8 @@ export interface FileTreeProps {
   onChangeWorkspace: () => void;
   onGoHome: () => void;
   onOpenSearch?: (scopePath: string) => void;
+  /** Opens an HTML file in the in-app browser. */
+  onOpenInBrowser?: (filePath: string) => void;
   /** Folder the toolbar's New File/New Folder should target, tracking selection. */
   onTargetDirChange?: (dir: string) => void;
   onError?: (message: string) => void;
@@ -495,7 +651,7 @@ export interface SettingsPanelProps {
   onClose: () => void;
 }
 
-export type SettingsSection = "appearance" | "explorer";
+export type SettingsSection = "appearance" | "explorer" | "source-control";
 
 // ── components/Breadcrumbs.tsx ─────────────────────────────────────────
 export interface BreadcrumbsProps {
@@ -537,6 +693,7 @@ export interface SidebarProps {
   onGoHome: () => void;
   onOpenDiff?: (filePath: string) => void;
   onOpenSearch?: (scopePath: string) => void;
+  onOpenInBrowser?: (filePath: string) => void;
   onTargetDirChange?: (dir: string) => void;
   onError?: (message: string) => void;
   searchScope?: string | null;
@@ -556,12 +713,15 @@ export interface TerminalProps {
   rootPath: string;
   shell: ShellKind;
   visible: boolean;
+  /** Opens a URL the shell printed in the in-app browser. */
+  onOpenUrl?: (url: string) => void;
 }
 
 // ── components/TerminalPanel.tsx ──────────────────────────────────────
 export interface TerminalPanelProps {
   rootPath: string;
   visible: boolean;
+  onOpenUrl?: (url: string) => void;
 }
 
 export interface TerminalTab {

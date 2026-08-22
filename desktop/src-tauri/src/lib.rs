@@ -1,4 +1,6 @@
 mod ai;
+mod browser;
+mod devtools_host;
 mod terminal;
 
 use std::path::Path;
@@ -1299,6 +1301,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(terminal::PtyMap::default())
+        // The only channel remote pages in the browser pane can use to talk to
+        // us — Tauri's IPC is closed to non-local origins.
+        .register_asynchronous_uri_scheme_protocol(
+            browser::SIGNAL_SCHEME,
+            |ctx, request, responder| {
+                browser::handle_signal(ctx.app_handle(), ctx.webview_label(), request.body());
+                let response = tauri::http::Response::builder()
+                    .status(200)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                    .header("Access-Control-Allow-Headers", "*")
+                    .header("Content-Type", "text/plain")
+                    .body(Vec::new())
+                    .expect("static response is well formed");
+                responder.respond(response);
+            },
+        )
         .invoke_handler(tauri::generate_handler![
             greet,
             clone_repository,
@@ -1339,7 +1358,41 @@ pub fn run() {
             git_checkout_file,
             git_push,
             git_push_set_upstream,
+            browser::browser_attach,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_navigate,
+            browser::browser_history,
+            browser::browser_eval,
+            browser::browser_close,
+            browser::browser_inspector_open,
+            browser::browser_inspector_close,
+            browser::browser_copy_text,
+            browser::browser_check_url,
+            browser::browser_clear_data,
         ])
-        .run(tauri::generate_context!())
+        .run(inspectable_context())
         .expect("error while running tauri application");
+}
+
+/// The app's context, with Chromium's debugging endpoint switched on.
+///
+/// The browser pane's inspector is the real DevTools front-end, which Chromium
+/// only serves over that endpoint — so without this there is nothing to embed.
+/// Port 0 means it picks a free one and writes it beside the browser profile,
+/// rather than us claiming a fixed port that a second copy of the app, or
+/// anything else on the machine, might already hold.
+///
+/// Applied here instead of in tauri.conf.json because the argument replaces
+/// wry's own defaults, which are worth keeping and are not part of the config.
+fn inspectable_context() -> tauri::Context {
+    let mut context = tauri::generate_context!();
+    if cfg!(windows) {
+        for window in &mut context.config_mut().app.windows {
+            if window.additional_browser_args.is_none() {
+                window.additional_browser_args = Some(browser::BROWSER_ARGS.to_string());
+            }
+        }
+    }
+    context
 }

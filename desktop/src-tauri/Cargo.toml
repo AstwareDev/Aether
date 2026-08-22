@@ -18,7 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `unstable` gives us multi-webview windows (the in-app browser pane);
+# `devtools` keeps the inspector reachable in release builds.
+tauri = { version = "2", features = ["unstable", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +28,11 @@ serde_json = "1"
 ignore = "0.4"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
+# The loopback host that serves the DevTools front-end and bridges its CDP
+# socket. Both sit on the hyper/tower stack reqwest already builds.
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["net", "rt", "macros", "time"] }
+tokio-tungstenite = "0.29"
 portable-pty = "0.9"
 base64 = "0.22"
 regex = "1"

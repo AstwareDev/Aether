@@ -69,6 +69,7 @@ export default function FileTree({
   onChangeWorkspace,
   onGoHome,
   onOpenSearch,
+  onOpenInBrowser,
   onTargetDirChange,
   onError,
 }: FileTreeProps) {
@@ -603,6 +604,7 @@ export default function FileTree({
       reveal: (path) => void revealInExplorer(path),
       terminal: (dir) => void openInTerminal(dir),
       search: (dir) => onOpenSearch?.(dir),
+      openInBrowser: (path) => onOpenInBrowser?.(path),
       cut: () => setClipboardPaths(selectedPaths, "cut"),
       copy: () => setClipboardPaths(selectedPaths, "copy"),
       paste: (dir) => void pasteInto(dir),
@@ -616,7 +618,7 @@ export default function FileTree({
       changeWorkspace: onChangeWorkspace,
       goHome: onGoHome,
     }),
-    [actions, onOpenSearch, selectedPaths, setClipboardPaths, pasteInto, copySelectionPaths, onRefresh, onChangeWorkspace, onGoHome],
+    [actions, onOpenSearch, onOpenInBrowser, selectedPaths, setClipboardPaths, pasteInto, copySelectionPaths, onRefresh, onChangeWorkspace, onGoHome],
   );
 
   useEffect(() => {
@@ -759,6 +761,7 @@ export default function FileTree({
           canUndo={actions.canUndo}
           canRedo={actions.canRedo}
           canSearch={!!onOpenSearch}
+          canOpenInBrowser={!!onOpenInBrowser}
           onClose={closeMenu}
           onAction={menuHandlers}
         />
@@ -1074,6 +1077,7 @@ interface MenuHandlers {
   reveal: (path: string) => void;
   terminal: (dir: string) => void;
   search: (dir: string) => void;
+  openInBrowser: (path: string) => void;
   cut: () => void;
   copy: () => void;
   paste: (dir: string) => void;
@@ -1098,6 +1102,7 @@ function ContextMenu({
   canUndo,
   canRedo,
   canSearch,
+  canOpenInBrowser,
   onClose,
   onAction,
 }: {
@@ -1108,6 +1113,7 @@ function ContextMenu({
   canUndo: boolean;
   canRedo: boolean;
   canSearch: boolean;
+  canOpenInBrowser: boolean;
   onClose: () => void;
   onAction: MenuHandlers;
 }) {
@@ -1163,6 +1169,10 @@ function ContextMenu({
     );
     if (canSearch) {
       items.push({ id: "search", label: "Find in Folder…", run: run(() => onAction.search(pasteDir)) });
+    }
+    // Only for files a browser can actually render on its own.
+    if (canOpenInBrowser && !isDir && /\.(html?|xhtml|svg)$/i.test(target)) {
+      items.push({ id: "browser", label: "Open in Browser", run: run(() => onAction.openInBrowser(target)) });
     }
     items.push(
       { id: "s2", separator: true },
