@@ -4,8 +4,11 @@ import { motion, AnimatePresence } from "motion/react";
 import { runReview, generateCommitMessage, isTaskReady, taskLabel, taskSetupMessage, openAiSettings, useAiConfig } from "../lib/ai";
 import { FileTypeIcon } from "../lib/icons";
 import { baseName } from "../lib/fs";
+import { SCM_VIEW_LABELS, useSetting } from "../lib/settings";
+import { Select } from "./settings/primitives";
+import { ChevronDownIcon, ChevronRightIcon } from "../lib/icons/ui";
 import CommitHistory from "./CommitHistory";
-import { RefreshSvg, BranchSvg, CheckSvg, SparkSvg, AgentSvg } from "../icons";
+import { RefreshSvg, BranchSvg, CheckSvg, SparkSvg, AgentSvg, SeverityIcon } from "../icons";
 import type { GitFile, ReviewIssue, ReviewSeverity, SourceControlProps } from "../types";
 
 const MAX_REVIEW_DIFF_CHARS = 40_000;
@@ -17,12 +20,12 @@ const SEVERITY_LABEL: Record<ReviewSeverity, string> = {
   improvement: "Improvement",
 };
 
-function severityDot(severity: ReviewSeverity): string {
+function severityColor(severity: ReviewSeverity): string {
   switch (severity) {
-    case "bug": return "bg-red-400";
-    case "security": return "bg-orange-400";
-    case "performance": return "bg-yellow-400";
-    default: return "bg-accent";
+    case "bug": return "text-red-400";
+    case "security": return "text-orange-400";
+    case "performance": return "text-yellow-400";
+    default: return "text-accent";
   }
 }
 
@@ -82,7 +85,18 @@ function statusColor(status: string): string {
 }
 
 export default function SourceControl({ rootPath, onOpenDiff }: SourceControlProps) {
-  const [viewMode, setViewMode] = useState<"changes" | "history" | "agent">("changes");
+  const scmSwitcher = useSetting("scmViewSwitcher");
+  const scmDefaultView = useSetting("scmDefaultView");
+  // Only the initial view honors the setting — once the user has picked a
+  // view this session, changing the default shouldn't yank them elsewhere.
+  const [viewMode, setViewMode] = useState<"changes" | "history" | "agent">(() => scmDefaultView);
+  // Only used by the "Stacked" layout — each section collapses
+  // independently, the same interaction as Explorer's Open Editors list, and
+  // starts collapsed so the page opens compact rather than three full lists deep.
+  const [openSections, setOpenSections] = useState({ changes: false, history: false, agent: false });
+  const toggleSection = useCallback((id: "changes" | "history" | "agent") => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -271,83 +285,21 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
     return acc;
   }, {});
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="flex min-h-0 flex-1 flex-col"
-    >
-      <div className="group flex items-center justify-between px-2 pb-1">
-        <span className="truncate pl-2 text-[11px] font-bold uppercase tracking-wide text-zinc-300">
-          Source Control
-        </span>
-        <div className="flex items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            title="Refresh"
-            className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.07] hover:text-zinc-200 disabled:opacity-40"
-          >
-            <RefreshSvg spinning={loading} />
-          </button>
+  // Every body fills whatever flex space its container hands it — a single
+  // active view gets the whole pane; inside "Stacked" that container
+  // is however much an expanded CollapsibleSection was given.
+  const scrollClass = (extra = "") => `scroll-thin min-h-0 flex-1 overflow-y-auto ${extra}`.trim();
+
+  const changesBody = () => (
+    <>
+      {branch && (
+        <div className="mx-3 mb-2 flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-1">
+          <BranchSvg />
+          <span className="truncate text-[11px] text-zinc-400">{branch}</span>
         </div>
-      </div>
+      )}
 
-      <div className="mx-3 mb-2 flex gap-0">
-        <button
-          type="button"
-          onClick={() => setViewMode("changes")}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-l-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
-            viewMode === "changes"
-              ? "border-accent/40 bg-accent/10 text-white"
-              : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
-          }`}
-        >
-          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          <span className="truncate">Changes</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("history")}
-          className={`-ml-px flex flex-1 items-center justify-center gap-1.5 border px-2 py-1.5 text-[11px] font-medium transition-colors ${
-            viewMode === "history"
-              ? "border-accent/40 bg-accent/10 text-white"
-              : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
-          }`}
-        >
-          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="truncate">History</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("agent")}
-          className={`-ml-px flex flex-1 items-center justify-center gap-1.5 rounded-r-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
-            viewMode === "agent"
-              ? "border-accent/40 bg-accent/10 text-white"
-              : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
-          }`}
-        >
-          <AgentSvg />
-          <span className="truncate">Agent Review</span>
-        </button>
-      </div>
-
-      {viewMode === "changes" ? (
-        <>
-          {branch && (
-            <div className="mx-3 mb-2 flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-1">
-              <BranchSvg />
-              <span className="truncate text-[11px] text-zinc-400">{branch}</span>
-            </div>
-          )}
-
-          <div className="mx-3 mb-1 flex flex-col gap-1">
+      <div className="mx-3 mb-1 flex flex-col gap-1">
         <div className="relative">
           <textarea
             ref={textareaRef}
@@ -467,7 +419,7 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
         )}
       </AnimatePresence>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+      <div className={scrollClass()}>
         {hasChanges ? (
           <>
             <p className="px-4 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">
@@ -506,114 +458,231 @@ export default function SourceControl({ rootPath, onOpenDiff }: SourceControlPro
           </p>
         ) : null}
       </div>
-        </>
-      ) : viewMode === "history" ? (
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-          <CommitHistory rootPath={rootPath} />
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mx-3 mb-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={runAgentReview}
-              disabled={!hasChanges || reviewing}
-              className="flex h-7 items-center justify-center gap-1.5 rounded-md bg-accent/90 px-3 text-[12px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {reviewing ? (
-                <>
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-black/40" />
-                  Reviewing…
-                </>
-              ) : (
-                <>
-                  <AgentSvg />
-                  Run Review
-                </>
-              )}
-            </button>
-            {visibleIssues.length > 0 && (
-              <span className="text-[11px] text-zinc-500">
-                {visibleIssues.length} issue{visibleIssues.length !== 1 ? "s" : ""} found
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={openAiSettings}
-              title="Change the Agent Review model in Settings → AI Configuration"
-              className="ml-auto truncate text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"
-            >
-              {reviewModelLabel}
-            </button>
-          </div>
+    </>
+  );
 
-          <AnimatePresence>
-            {reviewError && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mx-3 mb-2 overflow-hidden rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5"
-              >
-                <p className="text-[11px] leading-snug text-amber-300">{reviewError}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+  const historyBody = () => <div className={scrollClass()}><CommitHistory rootPath={rootPath} /></div>;
 
-          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3">
-            {Object.keys(issuesByFile).length > 0 ? (
-              Object.entries(issuesByFile).map(([file, issues]) => (
-                <div key={file} className="mb-3">
-                  <div className="mb-1 flex items-center gap-1.5 px-1">
-                    <FileTypeIcon name={baseName(file)} size={12} />
-                    <span className="truncate text-[11px] font-semibold text-zinc-300">{file}</span>
-                    <span className="text-[10px] text-zinc-600">({issues.length})</span>
-                  </div>
-                  <ul className="space-y-1">
-                    {issues.map((issue) => (
-                      <li key={issue.id}>
-                        <button
-                          type="button"
-                          onClick={() => revealIssue(issue)}
-                          title="Jump to line and show details"
-                          className={`w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
-                            activeIssueId === issue.id
-                              ? "border-accent/40 bg-accent/10"
-                              : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04]"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${severityDot(issue.severity)}`} />
-                            <div className="min-w-0 flex-1">
-                              <span className="block truncate text-[12px] font-medium text-zinc-200">
-                                {issue.title}
-                              </span>
-                              <span className="mt-0.5 block text-[10px] text-zinc-600">
-                                {SEVERITY_LABEL[issue.severity]} · line {issue.line}
-                              </span>
-                            </div>
-                          </div>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
-            ) : !reviewing ? (
-              <div className="flex flex-col items-center justify-center px-8 py-12 text-center">
-                <AgentSvg />
-                <p className="mt-3 text-[13px] font-medium text-zinc-300">
-                  {reviewIssues.length > 0 ? "All issues resolved" : "Agent Review"}
-                </p>
-                <p className="mt-1 text-[11px] text-zinc-500">
-                  {reviewIssues.length > 0
-                    ? "Every issue found in this review has been dismissed."
-                    : "Run a review to have GLM 5 analyze your changes for bugs and regressions."}
-                </p>
+  const agentBody = () => (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5">
+        <button
+          type="button"
+          onClick={runAgentReview}
+          disabled={!hasChanges || reviewing}
+          className="flex h-6 shrink-0 items-center justify-center gap-1.5 rounded bg-accent/90 px-2.5 text-[11px] font-medium text-black transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {reviewing ? (
+            <>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-black/40" />
+              Reviewing…
+            </>
+          ) : (
+            <>
+              <AgentSvg size={13} />
+              Run Review
+            </>
+          )}
+        </button>
+        {visibleIssues.length > 0 && (
+          <span className="shrink-0 text-[11px] text-zinc-500">
+            {visibleIssues.length} issue{visibleIssues.length !== 1 ? "s" : ""}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={openAiSettings}
+          title="Change the Agent Review model in Settings → AI Configuration"
+          className="ml-auto min-w-0 truncate text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          {reviewModelLabel}
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {reviewError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mx-3 mb-2 overflow-hidden rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5"
+          >
+            <p className="text-[11px] leading-snug text-amber-300">{reviewError}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className={scrollClass("px-3")}>
+        {Object.keys(issuesByFile).length > 0 ? (
+          Object.entries(issuesByFile).map(([file, issues]) => (
+            <div key={file} className="mb-3">
+              <div className="mb-1 flex items-center gap-1.5 px-1">
+                <FileTypeIcon name={baseName(file)} size={12} />
+                <span className="truncate text-[11px] font-semibold text-zinc-300">{file}</span>
+                <span className="text-[10px] text-zinc-600">({issues.length})</span>
               </div>
-            ) : null}
+              <ul className="space-y-1">
+                {issues.map((issue) => (
+                  <li key={issue.id}>
+                    <button
+                      type="button"
+                      onClick={() => revealIssue(issue)}
+                      title="Jump to line and show details"
+                      className={`w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
+                        activeIssueId === issue.id
+                          ? "border-accent/40 bg-accent/10"
+                          : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04]"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className={`mt-0.5 shrink-0 ${severityColor(issue.severity)}`}>
+                          <SeverityIcon severity={issue.severity} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px] font-medium text-zinc-200">
+                            {issue.title}
+                          </span>
+                          <span className={`mt-0.5 block text-[10px] ${severityColor(issue.severity)}`}>
+                            {SEVERITY_LABEL[issue.severity]} <span className="text-zinc-600">· line {issue.line}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        ) : !reviewing ? (
+          <div className="flex flex-col items-center justify-center px-8 py-12 text-center">
+            <AgentSvg size={28} className="text-zinc-600" />
+            <p className="mt-3 text-[13px] font-medium text-zinc-300">
+              {reviewIssues.length > 0 ? "All issues resolved" : "Agent Review"}
+            </p>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              {reviewIssues.length > 0
+                ? "Every issue found in this review has been dismissed."
+                : "Run a review to have GLM 5 analyze your changes for bugs and regressions."}
+            </p>
           </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="group flex items-center justify-between px-2 pb-1">
+        <span className="truncate pl-2 text-[11px] font-bold uppercase tracking-wide text-zinc-300">
+          Source Control
+        </span>
+        <div className="flex items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={loading}
+            title="Refresh"
+            className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.07] hover:text-zinc-200 disabled:opacity-40"
+          >
+            <RefreshSvg spinning={loading} />
+          </button>
         </div>
+      </div>
+
+      {scmSwitcher === "dropdown" ? (
+        <div className="mx-3 mb-2">
+          <Select
+            value={viewMode}
+            onChange={setViewMode}
+            label="Source Control view"
+            options={(Object.keys(SCM_VIEW_LABELS) as (keyof typeof SCM_VIEW_LABELS)[]).map((value) => ({
+              value,
+              label: SCM_VIEW_LABELS[value],
+            }))}
+          />
+        </div>
+      ) : scmSwitcher === "tabs" ? (
+        <div className="mx-3 mb-2 flex gap-0">
+          <button
+            type="button"
+            onClick={() => setViewMode("changes")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-l-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+              viewMode === "changes"
+                ? "border-accent/40 bg-accent/10 text-white"
+                : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+            }`}
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <span className="truncate">Changes</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("history")}
+            className={`-ml-px flex flex-1 items-center justify-center gap-1.5 border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+              viewMode === "history"
+                ? "border-accent/40 bg-accent/10 text-white"
+                : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+            }`}
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="truncate">History</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("agent")}
+            className={`-ml-px flex flex-1 items-center justify-center gap-1.5 rounded-r-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+              viewMode === "agent"
+                ? "border-accent/40 bg-accent/10 text-white"
+                : "border-white/[0.08] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+            }`}
+          >
+            <AgentSvg size={14} />
+            <span className="truncate">Agent Review</span>
+          </button>
+        </div>
+      ) : null}
+
+      {scmSwitcher === "all" ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <CollapsibleSection
+            label="Changes"
+            count={files.length}
+            expanded={openSections.changes}
+            onToggle={() => toggleSection("changes")}
+          >
+            {changesBody()}
+          </CollapsibleSection>
+          <CollapsibleSection
+            label="History"
+            expanded={openSections.history}
+            onToggle={() => toggleSection("history")}
+          >
+            {historyBody()}
+          </CollapsibleSection>
+          <CollapsibleSection
+            label="Agent Review"
+            count={visibleIssues.length}
+            expanded={openSections.agent}
+            onToggle={() => toggleSection("agent")}
+          >
+            {agentBody()}
+          </CollapsibleSection>
+        </div>
+      ) : viewMode === "changes" ? (
+        <>{changesBody()}</>
+      ) : viewMode === "history" ? (
+        historyBody()
+      ) : (
+        agentBody()
       )}
 
       <AnimatePresence>
@@ -683,5 +752,56 @@ function FileContextMenu({
         </button>
       </motion.div>
     </>
+  );
+}
+
+/** A collapsible page section, same header/toggle pattern as Explorer's Open Editors list. */
+function CollapsibleSection({
+  label,
+  count,
+  expanded,
+  onToggle,
+  children,
+}: {
+  label: string;
+  count?: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  // Expanded sections join the flex column with equal weight, so one open
+  // section fills nearly all the space, two split it evenly, three split it
+  // three ways — collapsed sections only ever take their header's height.
+  return (
+    <div className={`border-b border-white/[0.05] last:border-b-0 ${expanded ? "flex min-h-0 flex-1 flex-col" : "shrink-0"}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="group flex h-6 w-full shrink-0 items-center gap-1 pl-2 pr-2 text-left"
+      >
+        <span className="flex w-4 justify-center text-zinc-500">
+          {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        </span>
+        <span className="flex-1 truncate text-[11px] font-bold uppercase tracking-wide text-zinc-400 transition-colors group-hover:text-zinc-200">
+          {label}
+        </span>
+        {!!count && <span className="shrink-0 text-[10px] font-normal tabular-nums text-zinc-600">{count}</span>}
+      </button>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="body"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
+            className="flex min-h-0 flex-1 flex-col pb-1"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

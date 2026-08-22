@@ -99,6 +99,13 @@ export const BrowserIcon = ({ size = 16, className }: UIIconProps) => (
   </svg>
 );
 
+export const HomeIcon = ({ size = 16, className }: UIIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M2.5 7L8 2.5 13.5 7" />
+    <path d="M3.75 8v5a.75.75 0 00.75.75h7a.75.75 0 00.75-.75V8" />
+  </svg>
+);
+
 export const ArrowLeftIcon = ({ size = 16, className }: UIIconProps) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M10 3L5 8l5 5" />

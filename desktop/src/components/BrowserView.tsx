@@ -4,12 +4,13 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ExternalLinkIcon,
+  HomeIcon,
   InspectIcon,
   PickerIcon,
   RefreshIcon,
 } from "../lib/icons/ui";
 import { isTauri } from "../lib/fs";
-import { isBlankBrowserUrl, normalizeUrl } from "../lib/browser";
+import { blankBrowserUrl, isBlankBrowserUrl, normalizeUrl } from "../lib/browser";
 import { elementReport } from "../lib/browserReport";
 import {
   attachBrowserView,
@@ -57,8 +58,8 @@ function sameBounds(a: BrowserViewBounds | null, b: BrowserViewBounds): boolean 
 }
 
 /**
- * The in-app browser, in the spirit of VS Code's Simple Browser but backed by a
- * real child webview rather than an iframe — pages that set frame-blocking
+ * Agent Browser, the in-app browser: backed by a real child webview rather
+ * than an iframe — pages that set frame-blocking
  * headers (YouTube and most of the web) load normally. The webview is an
  * OS-level layer positioned over `hostRef`, so it has to be hidden whenever
  * something in the React tree would sit on top of it.
@@ -393,14 +394,17 @@ export default function BrowserView({
       pendingDelta.current = 0;
       verifyReachable(target);
 
-      // With no page loaded there is no webview yet; changing `current` makes
-      // the layout effect create one pointed at the new address.
+      // Changing `current` makes the layout effect create a webview pointed at
+      // the new address. If Home put the start page over a view that already
+      // exists, that effect only re-shows it — so the address has to be sent
+      // too. Whichever lands first, the view ends up on the target.
       if (isBlankBrowserUrl(prev[at])) {
         const forked = [...prev.slice(0, at + 1), target];
         stackRef.current = forked;
         cursorRef.current = forked.length - 1;
         setStack(forked);
         setCursor(forked.length - 1);
+        void navigateBrowserView(label, target).catch(() => {});
         return;
       }
 
@@ -412,9 +416,25 @@ export default function BrowserView({
 
   const go = useCallback(
     (delta: number) => {
+      const prev = stackRef.current;
+      const at = cursorRef.current;
+      const target = at + delta;
+      if (target < 0 || target >= prev.length) return;
+
+      // The start page is ours, not something the webview ever loaded, so its
+      // history knows nothing about it. Stepping into or out of it moves our
+      // own cursor and leaves that history alone — which keeps the two lined
+      // up for the entries that *are* real pages.
+      if (isBlankBrowserUrl(prev[at]) || isBlankBrowserUrl(prev[target])) {
+        setFailure(null);
+        cursorRef.current = target;
+        setCursor(target);
+        return;
+      }
+
       setLoading(true);
       if (!isTauri) {
-        setCursor((c) => Math.min(stackRef.current.length - 1, Math.max(0, c + delta)));
+        setCursor(target);
         return;
       }
       pendingDelta.current = delta;
@@ -422,6 +442,20 @@ export default function BrowserView({
     },
     [label],
   );
+
+  /** Back to the start page, keeping the page behind it reachable with Back. */
+  const goHome = useCallback(() => {
+    const prev = stackRef.current;
+    const at = cursorRef.current;
+    if (isBlankBrowserUrl(prev[at])) return;
+    setLoading(false);
+    setFailure(null);
+    const forked = [...prev.slice(0, at + 1), blankBrowserUrl()];
+    stackRef.current = forked;
+    cursorRef.current = forked.length - 1;
+    setStack(forked);
+    setCursor(forked.length - 1);
+  }, []);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -486,6 +520,9 @@ export default function BrowserView({
         </button>
         <button type="button" title="Reload" aria-label="Reload" disabled={blank} onClick={reload} className={controlClass}>
           <RefreshIcon size={14} />
+        </button>
+        <button type="button" title="Home" aria-label="Home" disabled={blank} onClick={goHome} className={controlClass}>
+          <HomeIcon size={15} />
         </button>
 
         <form

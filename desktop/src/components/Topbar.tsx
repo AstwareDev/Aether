@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setSetting, useSetting } from "../lib/settings";
-import { SidebarIcon, TerminalIcon } from "../lib/icons/ui";
+import { BrowserIcon, SidebarIcon, TerminalIcon } from "../lib/icons/ui";
 import { MinimizeIcon, MaximizeIcon, RestoreIcon, TopCloseIcon } from "../icons";
 import type { TopbarProps } from "../types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const appWindow = isTauri ? getCurrentWindow() : null;
 
-export default function Topbar({ hasWorkspace }: TopbarProps) {
+export default function Topbar({ hasWorkspace, onOpenBrowser }: TopbarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const sidebarVisible = useSetting("sidebarVisible");
   const terminalVisible = useSetting("terminalVisible");
@@ -43,6 +43,15 @@ export default function Topbar({ hasWorkspace }: TopbarProps) {
 
       {hasWorkspace && (
         <div className="flex h-full items-center pr-1">
+          <button
+            type="button"
+            onClick={onOpenBrowser}
+            aria-label="Open Agent Browser"
+            title="Open Agent Browser"
+            className="flex h-6 w-7 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.08] hover:text-white"
+          >
+            <BrowserIcon size={15} />
+          </button>
           <button
             type="button"
             onClick={() => setSetting("sidebarVisible", !sidebarVisible)}

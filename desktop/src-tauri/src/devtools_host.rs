@@ -135,9 +135,12 @@ async fn asset<R: Runtime>(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-/// Aether's own files: the two faces the theme names, which the front-end
-/// cannot reach any other way — it is a different origin from the app that
-/// bundles them — and the script that carries the theme into shadow DOM.
+/// Aether's own files: the two faces and the mark the theme names, which the
+/// front-end cannot reach any other way — it is a different origin from the app
+/// that bundles them — and the script that carries the theme into shadow DOM.
+///
+/// The mark is the same file the app itself renders, so a change to the logo
+/// reaches the inspector without anyone remembering to copy it.
 async fn own_file(Path(file): Path<String>) -> Response {
     let (content_type, bytes): (&str, &'static [u8]) = match file.as_str() {
         "inter.woff2" => ("font/woff2", include_bytes!("../assets/fonts/inter.woff2")),
@@ -145,6 +148,7 @@ async fn own_file(Path(file): Path<String>) -> Response {
             "font/woff2",
             include_bytes!("../assets/fonts/jetbrains-mono.woff2"),
         ),
+        "logo.svg" => ("image/svg+xml", include_bytes!("../../public/logo.svg")),
         "inject.js" => ("text/javascript; charset=utf-8", INJECT.as_bytes()),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };

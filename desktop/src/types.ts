@@ -185,7 +185,8 @@ export interface CompletionOptions {
 // ── lib/settings.ts ───────────────────────────────────────────────────
 export type EditorLineNumbers = "on" | "relative" | "off";
 export type ScmView = "changes" | "history" | "agent";
-export type ScmViewSwitcher = "dropdown" | "tabs";
+/** "all" skips the switcher entirely — Changes/History/Agent Review render as stacked, independently collapsible sections instead of one picked view. */
+export type ScmViewSwitcher = "dropdown" | "tabs" | "all";
 
 export interface Settings {
   iconTheme: string;
@@ -685,7 +686,6 @@ export interface SidebarProps {
   onNewFolder: () => void;
   onRefresh: () => void;
   onCollapseAll: () => void;
-  onOpenBrowser?: () => void;
   onOpenPalette: () => void;
   onSelectView: (id: ViewId) => void;
   onOpenSettings: () => void;
@@ -733,6 +733,7 @@ export interface TerminalTab {
 // ── components/Topbar.tsx ─────────────────────────────────────────────
 export interface TopbarProps {
   hasWorkspace: boolean;
+  onOpenBrowser: () => void;
 }
 
 // ── components/Welcome.tsx ────────────────────────────────────────────
@@ -745,6 +746,11 @@ export interface WorkspaceProps {
   path: string;
   onClose: () => void;
   onChangeWorkspace: (path: string) => void;
+  /**
+   * Hands the browser action up to the topbar, which is rendered above the
+   * workspace and so cannot reach its state any other way.
+   */
+  registerOpenBrowser?: (open: () => void) => void;
 }
 
 export interface FileBuffer {

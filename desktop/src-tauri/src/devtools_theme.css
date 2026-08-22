@@ -11,8 +11,20 @@
  * The side effect is that its own light/dark switching stops applying, which is
  * the intent: this is a panel in a dark editor, not a browser window.
  *
- * Token names drift between Chromium versions. Unknown properties cost nothing,
- * so this covers more than any one version defines.
+ * There are two layers to get right. Chromium's own `--sys-color-*` tokens are
+ * one. The other is Edge's: WebView2's DevTools ships a large Fluent stylesheet
+ * that redefines Chromium's tokens in terms of its own `--neutral-*` and
+ * `--accent-*` variables, and paints most of the chrome through them with
+ * `!important` — for instance
+ *
+ *   .network-toolbar-container, .panel.network .filter-bar,
+ *   .panel.network .toolbar { background-color: var(--neutral-layer-l2) !important }
+ *
+ * so the panels stay Edge-grey no matter what the Chromium tokens say. Both
+ * layers are mapped below.
+ *
+ * Token names drift between versions. Unknown properties cost nothing, so this
+ * covers more than any one version defines.
  */
 
 @font-face {
@@ -89,6 +101,53 @@
   --sys-color-state-header-hover: rgba(255, 255, 255, 0.06) !important;
   --sys-color-state-on-header-hover: rgba(255, 255, 255, 0.06) !important;
 
+  /*
+   * Edge's Fluent layer. `l1`–`l4` are its background elevations: `l4` is the
+   * panel body, `l2` the tab strip and the Network toolbar and filter bar.
+   */
+  --neutral-layer-l1: #0f0f0f !important;
+  --neutral-layer-l2: #050505 !important;
+  --neutral-layer-l3: #0c0c0c !important;
+  --neutral-layer-l4: #0a0a0a !important;
+
+  --neutral-foreground-rest: #e6e6e6 !important;
+  --neutral-foreground-hover: #ffffff !important;
+  --neutral-foreground-active: #ffffff !important;
+  --neutral-foreground-hint: #8a8a8a !important;
+  --neutral-foreground-hint-selected: #a3a3a3 !important;
+
+  /* Edge fills these with opaque greys; Aether layers translucent white. */
+  --neutral-fill-rest: rgba(255, 255, 255, 0.06) !important;
+  --neutral-fill-hover: rgba(255, 255, 255, 0.09) !important;
+  --neutral-fill-active: rgba(255, 255, 255, 0.12) !important;
+  --neutral-fill-selected: rgba(255, 255, 255, 0.1) !important;
+  --neutral-fill-stealth-hover: rgba(255, 255, 255, 0.06) !important;
+  --neutral-fill-stealth-active: rgba(255, 255, 255, 0.09) !important;
+  --neutral-fill-stealth-selected: rgba(255, 255, 255, 0.1) !important;
+  --neutral-fill-rest-l1: rgba(255, 255, 255, 0.05) !important;
+  --neutral-fill-rest-l2: rgba(255, 255, 255, 0.04) !important;
+
+  --neutral-outline-rest: rgba(255, 255, 255, 0.14) !important;
+  --neutral-outline-hover: rgba(255, 255, 255, 0.22) !important;
+  --neutral-outline-active: rgba(255, 255, 255, 0.28) !important;
+  --neutral-focus: rgba(255, 255, 255, 0.28) !important;
+
+  /* Edge's accent is a blue; Aether's is plain white, so text on it is black. */
+  --accent-fill-rest: #ffffff !important;
+  --accent-fill-hover: #ffffff !important;
+  --accent-fill-active: #e6e6e6 !important;
+  --accent-fill-selected: #ffffff !important;
+  --accent-foreground-rest: #ffffff !important;
+  --accent-foreground-hover: #cccccc !important;
+  --accent-foreground-active: #ffffff !important;
+  --accent-foreground-cut: #000000 !important;
+
+  --dev-tools-background-readonly: #050505 !important;
+  --dev-tools-editor-selection: rgba(255, 255, 255, 0.14) !important;
+  --dev-tools-link-rest: #ffffff !important;
+  --dev-tools-link-hover: #cccccc !important;
+  --dev-tools-link-active: #ffffff !important;
+
   /* Typography. */
   --default-font-family: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", sans-serif !important;
   --source-code-font-family: "JetBrains Mono Variable", ui-monospace, Consolas, monospace !important;
@@ -116,18 +175,55 @@ body,
   font-family: "JetBrains Mono Variable", ui-monospace, Consolas, monospace !important;
 }
 
+/* One input style Edge paints with a flat grey rather than through a variable. */
+.harmony-input {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #e6e6e6 !important;
+}
+
 /*
- * The screencast toggle mirrors the page into a strip of the panel, which is of
- * no use when the page itself is already sitting right beside it.
+ * The settings dialog.
  *
- * Matched loosely because the button's markup has changed shape more than once
- * across Chromium versions - it has been a `button`, a `div[role=button]` and a
- * `devtools-button`, labelled through `aria-label`, `title` or `jslogcontext`.
+ * `--icon-default` is the only lever needed for the icons: `devtools-icon`
+ * reads its colour from it, while the semantic names — warning, error, info —
+ * override it with tokens of their own, so those keep meaning what they mean.
+ * Declaring it here rather than on `:root` leaves the rest of DevTools alone;
+ * custom properties inherit through shadow boundaries, so this one declaration
+ * reaches every icon in the dialog, nav and body alike. No `!important`: unlike
+ * the tokens above, these sit on a descendant and already win on specificity.
+ *
+ * The close button hangs off the glass pane rather than the settings window, so
+ * it needs naming separately to be part of the same set.
  */
-[aria-label*="screencast" i],
-[title*="screencast" i],
-[jslogcontext*="screencast" i],
-.screencast,
-.screencast-view {
-  display: none !important;
+.settings-window-main,
+.dialog-close-button {
+  --icon-default: #ffffff;
+  --app-color-navigation-drawer-label-selected: #ffffff;
+}
+
+/*
+ * The selected item in the settings nav is a hardcoded Chromium blue rather
+ * than a token, so it has to be answered with a rule.
+ */
+.vertical-tab-layout .tabbed-pane-header-tab.selected {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/*
+ * Edge sets its own DevTools mark beside the "Settings" heading. Aether's mark
+ * replaces it as a mask rather than an image, so the single black-filled
+ * logo.svg the app already ships paints white here without a second copy.
+ */
+.settings-window-title::before {
+  background-image: none !important;
+  background-color: #ffffff !important;
+  -webkit-mask-image: url("/aether/logo.svg") !important;
+  mask-image: url("/aether/logo.svg") !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
 }

@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { extensionOf } from "./lib/fs";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -138,16 +139,66 @@ export function SparkSvg() {
   );
 }
 
-export function AgentSvg() {
+/** A processor/chip glyph for Agent Review — monochrome `currentColor` throughout so it reads correctly on any background (accent button, zinc sidebar text, empty-state heading). */
+export function AgentSvg({ size = 18, className = "" }: { size?: number; className?: string } = {}) {
   return (
-    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false" className="shrink-0 text-zinc-500">
-      <ellipse cx="10" cy="7.5" rx="3.6" ry="3.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <ellipse cx="10" cy="7" rx="2.1" ry="2.1" fill="#8ef7da" opacity="0.7" />
-      <circle cx="10" cy="7" r="0.7" fill="#00fff7" />
-      <rect x="7" y="11.1" width="6" height="2.3" rx="1.15" stroke="currentColor" strokeWidth="1.2" fill="#0f172a" />
-      <path d="M4.4 17c.7-3.1 3.2-5.1 5.6-5.1s4.9 2 5.6 5.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-      <rect x="6.7" y="13.8" width="1.4" height="1.2" rx="0.45" fill="#8ef7da" opacity="0.7" />
-      <rect x="11.9" y="13.8" width="1.4" height="1.2" rx="0.45" fill="#8ef7da" opacity="0.7" />
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false" className={`shrink-0 ${className}`}>
+      <rect x="6.5" y="6.5" width="7" height="7" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="10" cy="10" r="1.3" fill="currentColor" />
+      <path
+        d="M10 2.2v2.6M10 15.2v2.6M2.2 10h2.6M15.2 10h2.6M4.8 4.8l1.85 1.85M13.35 13.35l1.85 1.85M4.8 15.2l1.85-1.85M13.35 6.65l1.85-1.85"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+const SEVERITY_ICON_PATHS: Record<string, ReactElement> = {
+  bug: (
+    <>
+      <rect x="5" y="5.5" width="6" height="7" rx="3" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M8 5.5V3.6M5.6 7.2 3.4 5M12.6 5l-2.2 2.2M3 8h2.5M13 8h-2.5M5.6 11.8 3.7 13.6M10.4 11.8l1.9 1.8"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
+    </>
+  ),
+  security: (
+    <path
+      d="M8 1.6 13 3.35v3.9c0 3.55-2.15 6.2-5 7.1-2.85-.9-5-3.55-5-7.1v-3.9L8 1.6Z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+  ),
+  performance: (
+    <>
+      <path d="M2.8 11.5a5.5 5.5 0 0 1 10.4 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M8 8.2 10.8 5.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <circle cx="8" cy="8.2" r="0.9" fill="currentColor" />
+    </>
+  ),
+  improvement: (
+    <>
+      <path
+        d="M8 1.6a4.3 4.3 0 0 1 2.35 7.9c-.4.27-.6.62-.6 1.05v.15h-3.5v-.15c0-.43-.2-.78-.6-1.05A4.3 4.3 0 0 1 8 1.6Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M6.5 12.4h3M6.9 13.9h2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </>
+  ),
+};
+
+/** Small per-severity glyph for an Agent Review issue card, colored by the caller via `text-*`. */
+export function SeverityIcon({ severity, size = 12 }: { severity: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false" className="shrink-0">
+      {SEVERITY_ICON_PATHS[severity] ?? SEVERITY_ICON_PATHS.improvement}
     </svg>
   );
 }

@@ -133,7 +133,7 @@ function scheduleWorkspaceModelSync(files: IndexedFile[]): void {
 
 const FIRST_GROUP_ID = "g1";
 
-export default function Workspace({ path, onClose, onChangeWorkspace }: WorkspaceProps) {
+export default function Workspace({ path, onClose, onChangeWorkspace, registerOpenBrowser }: WorkspaceProps) {
   const [groups, setGroups] = useState<EditorGroup[]>([{ id: FIRST_GROUP_ID, openPaths: [], activePath: null }]);
   const [activeGroupId, setActiveGroupId] = useState<string>(FIRST_GROUP_ID);
   // Read by handlers that must act on the latest layout without re-running on every change.
@@ -505,6 +505,10 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
     );
     setActiveGroupId(groupId);
   }, []);
+
+  useEffect(() => {
+    registerOpenBrowser?.(() => openBrowser());
+  }, [registerOpenBrowser, openBrowser]);
 
   const handleOpenDiff = useCallback(
     async (filePath: string) => {
@@ -937,7 +941,7 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
       { id: "view.scm", title: "Show Source Control", category: "View", icon: ScmIcon, run: () => selectView("scm") },
       { id: "view.extensions", title: "Show Extensions", category: "View", icon: ExtensionsIcon, run: () => selectView("extensions") },
       { id: "view.settings", title: "Open Settings", category: "View", icon: SettingsIcon, shortcut: "Ctrl+,", run: () => openSettings() },
-      { id: "view.browser", title: "Browser: Open Simple Browser", category: "View", icon: BrowserIcon, keywords: "web preview localhost url", run: () => openBrowser() },
+      { id: "view.browser", title: "Browser: Open Agent Browser", category: "View", icon: BrowserIcon, keywords: "web preview localhost url", run: () => openBrowser() },
       { id: "explorer.refresh", title: "Refresh Explorer", category: "View", icon: RefreshIcon, run: refreshTree },
       { id: "explorer.collapse", title: "Collapse Folders in Explorer", category: "View", icon: CollapseAllIcon, run: collapseAll },
     ];
@@ -1145,6 +1149,12 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
           {gActive && gIsBrowser ? (
             <Suspense fallback={<div className="h-full w-full bg-canvas" />}>
               <BrowserView
+                // Two browser tabs in one group are the same element in the
+                // same slot, so without a key React reuses the instance and the
+                // second tab inherits the first one's history. Remounting is
+                // safe: history and pane chrome live per-label outside the
+                // component precisely so they survive this.
+                key={gActive}
                 viewKey={gActive}
                 url={browserUrls[gActive] ?? urlFromBrowserPath(gActive)}
                 visible={gBrowserVisible}
@@ -1235,7 +1245,6 @@ export default function Workspace({ path, onClose, onChangeWorkspace }: Workspac
               onNewFolder={requestNewFolder}
               onRefresh={refreshTree}
               onCollapseAll={collapseAll}
-              onOpenBrowser={() => openBrowser()}
               onOpenInBrowser={(p) => openBrowser(fileUrl(p))}
               onOpenPalette={openFilesPalette}
               onSelectView={selectView}

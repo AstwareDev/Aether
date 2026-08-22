@@ -1,9 +1,9 @@
 // Carries the injected stylesheet into DevTools' shadow roots.
 //
 // Custom properties inherit through shadow boundaries, so the palette reaches
-// the whole UI from the document alone. Ordinary rules do not - and hiding a
-// toolbar button is an ordinary rule. This adopts the same sheet into every
-// shadow root as it is created, and keeps it there.
+// the whole UI from the document alone. Ordinary rules do not, and the theme
+// needs a few of those. This adopts the same sheet into every shadow root as it
+// is created, and keeps it there.
 //
 // Served from Aether's own origin because the front-end's CSP allows scripts
 // from `self` but not inline ones.

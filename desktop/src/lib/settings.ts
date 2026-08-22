@@ -30,10 +30,16 @@ export const SCM_VIEW_LABELS: Record<ScmView, string> = {
   agent: "Agent Review",
 };
 
+export const SCM_VIEW_SWITCHER_LABELS: Record<ScmViewSwitcher, string> = {
+  dropdown: "Dropdown",
+  tabs: "Tabs",
+  all: "Stacked",
+};
+
 const LAYOUT_MODES: LayoutMode[] = ["aether", "vscode", "compact"];
 const LINE_NUMBER_MODES: EditorLineNumbers[] = ["on", "relative", "off"];
 const SCM_VIEWS: ScmView[] = ["changes", "history", "agent"];
-const SCM_VIEW_SWITCHERS: ScmViewSwitcher[] = ["dropdown", "tabs"];
+const SCM_VIEW_SWITCHERS: ScmViewSwitcher[] = ["dropdown", "tabs", "all"];
 
 const clamp = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === "number" ? value : Number(value);

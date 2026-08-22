@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserIcon, SearchIcon } from "../lib/icons/ui";
+import { SearchIcon } from "../lib/icons/ui";
 import { browserLabel } from "../lib/browser";
 import Favicon from "./Favicon";
 import type { BrowserStartPageProps } from "../types";
@@ -7,9 +7,13 @@ import type { BrowserStartPageProps } from "../types";
 const SUGGESTED_PORTS = [3000, 5173, 8080, 4200];
 
 /**
- * What a pane shows before anything is loaded. A browser tab that opens onto a
- * dev server nobody asked for is a surprise, so a new pane starts empty and
- * offers the addresses actually worth one click in an editor.
+ * What a pane shows before anything is loaded: the mark, one address field and
+ * a row of places worth a click.
+ *
+ * A browser tab that opens onto a dev server nobody asked for is a surprise, so
+ * a new pane still starts empty. Recents are session-scoped, so on a cold start
+ * there are none — the row falls back to the local ports an editor is most
+ * likely to want, rather than sitting empty.
  */
 export default function BrowserStartPage({ recents, onNavigate }: BrowserStartPageProps) {
   const [draft, setDraft] = useState("");
@@ -19,13 +23,33 @@ export default function BrowserStartPage({ recents, onNavigate }: BrowserStartPa
     inputRef.current?.focus();
   }, []);
 
+  const shortcuts = recents.length
+    ? recents.map((entry) => ({
+        key: entry.url,
+        url: entry.url,
+        label: entry.title || browserLabel(entry.url),
+        hint: entry.url,
+        glyph: <Favicon src={entry.icon} size={20} />,
+      }))
+    : SUGGESTED_PORTS.map((port) => ({
+        key: `localhost:${port}`,
+        url: `localhost:${port}`,
+        label: `localhost:${port}`,
+        hint: `localhost:${port}`,
+        glyph: <span className="font-mono text-[11px] leading-none text-zinc-400">{port}</span>,
+      }));
+
   return (
-    <div className="scroll-thin flex h-full flex-col items-center overflow-y-auto bg-canvas px-6 py-14">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center gap-2.5 text-zinc-400">
-          <BrowserIcon size={20} />
-          <h2 className="text-sm">Browser</h2>
-        </div>
+    // `m-auto` rather than `justify-center` so a short pane scrolls from the top
+    // instead of clipping the mark off the edge.
+    <div className="scroll-thin flex h-full flex-col overflow-y-auto bg-canvas px-6">
+      <div className="m-auto flex w-full max-w-xl flex-col items-center py-16">
+        <img
+          src="/logo.svg"
+          alt=""
+          className="h-14 w-14 select-none object-contain opacity-90 brightness-0 invert"
+        />
+        <h1 className="mt-5 text-[21px] font-medium tracking-tight text-zinc-200">Agent Browser</h1>
 
         <form
           onSubmit={(e) => {
@@ -33,10 +57,13 @@ export default function BrowserStartPage({ recents, onNavigate }: BrowserStartPa
             const value = draft.trim();
             if (value) onNavigate(value);
           }}
-          className="relative"
+          className="relative mt-9 w-full"
         >
-          <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600">
-            <SearchIcon size={14} />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500"
+          >
+            <SearchIcon size={16} />
           </span>
           <input
             ref={inputRef}
@@ -45,56 +72,29 @@ export default function BrowserStartPage({ recents, onNavigate }: BrowserStartPa
             aria-label="Address or search"
             placeholder="Enter an address, or search the web"
             onChange={(e) => setDraft(e.target.value)}
-            className="w-full rounded-lg border border-white/[0.07] bg-white/[0.03] py-2 pl-9 pr-3 text-[13px] text-zinc-200 outline-none transition-colors placeholder:text-zinc-600 focus:border-accent/40 focus:bg-white/[0.05]"
+            className="h-12 w-full rounded-full border border-white/[0.07] bg-white/[0.03] pl-13 pr-5 text-[13px] text-zinc-200 outline-none transition-colors placeholder:text-zinc-600 hover:border-white/[0.11] hover:bg-white/[0.05] focus:border-accent/40 focus:bg-white/[0.05]"
           />
         </form>
 
-        <section className="mt-8">
-          <h3 className="mb-2 text-[10px] uppercase tracking-wide text-zinc-600">Local servers</h3>
-          <div className="flex flex-wrap gap-1.5">
-            {SUGGESTED_PORTS.map((port) => (
-              <button
-                key={port}
-                type="button"
-                onClick={() => onNavigate(`localhost:${port}`)}
-                className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-1 font-mono text-[11px] text-zinc-400 transition-colors hover:border-accent/30 hover:bg-white/[0.05] hover:text-zinc-200"
-              >
-                localhost:{port}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {recents.length > 0 && (
-          <section className="mt-7">
-            <h3 className="mb-1 text-[10px] uppercase tracking-wide text-zinc-600">Recent</h3>
-            <ul>
-              {recents.map((entry) => (
-                <li key={entry.url}>
+        {shortcuts.length > 0 && (
+          <nav aria-label={recents.length ? "Recently visited" : "Local servers"} className="mt-10">
+            <ul className="flex flex-wrap justify-center gap-3">
+              {shortcuts.map((item) => (
+                <li key={item.key}>
                   <button
                     type="button"
-                    onClick={() => onNavigate(entry.url)}
-                    title={entry.url}
-                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+                    onClick={() => onNavigate(item.url)}
+                    title={item.hint}
+                    aria-label={item.label}
+                    className="flex h-12 w-12 items-center justify-center rounded-full border border-white/[0.06] bg-white/[0.03] text-zinc-400 transition-colors hover:border-white/[0.14] hover:bg-white/[0.07] hover:text-zinc-200 focus-visible:border-accent/40 focus-visible:outline-none"
                   >
-                    <Favicon src={entry.icon} size={14} />
-                    <span className="truncate text-[12px] text-zinc-300">
-                      {entry.title || browserLabel(entry.url)}
-                    </span>
-                    <span className="truncate text-[11px] text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">
-                      {entry.url}
-                    </span>
+                    {item.glyph}
                   </button>
                 </li>
               ))}
             </ul>
-          </section>
+          </nav>
         )}
-
-        <p className="mt-8 text-[11px] leading-relaxed text-zinc-600">
-          Pages open here from the address bar, from “Open in Browser” on an HTML file, or by clicking a
-          link the terminal prints.
-        </p>
       </div>
     </div>
   );

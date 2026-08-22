@@ -16,7 +16,6 @@ import {
   RefreshIcon,
   CollapseAllIcon,
   ExtensionsIcon,
-  BrowserIcon,
 } from "../lib/icons/ui";
 import type { ComponentType } from "react";
 import type { UIIconProps, SidebarProps, OpenEditorsProps } from "../types";
@@ -57,7 +56,6 @@ function PanelContent({
   onNewFolder,
   onRefresh,
   onCollapseAll,
-  onOpenBrowser,
   onOpenPalette: _onOpenPalette,
   onChangeWorkspace,
   onGoHome,
@@ -81,7 +79,6 @@ function PanelContent({
   onNewFolder: () => void;
   onRefresh: () => void;
   onCollapseAll: () => void;
-  onOpenBrowser?: () => void;
   onOpenPalette: () => void;
   onChangeWorkspace: () => void;
   onGoHome: () => void;
@@ -105,9 +102,6 @@ function PanelContent({
           <ToolbarButton label="New Folder" onClick={onNewFolder}><NewFolderIcon size={15} /></ToolbarButton>
           <ToolbarButton label="Refresh Explorer" onClick={onRefresh}><RefreshIcon size={15} /></ToolbarButton>
           <ToolbarButton label="Collapse Folders" onClick={onCollapseAll}><CollapseAllIcon size={15} /></ToolbarButton>
-          {onOpenBrowser && (
-            <ToolbarButton label="Open Simple Browser" onClick={onOpenBrowser}><BrowserIcon size={14} /></ToolbarButton>
-          )}
         </div>
       </div>
       <FileTree
@@ -157,7 +151,6 @@ export default memo(function Sidebar(props: SidebarProps) {
       onNewFolder={props.onNewFolder}
       onRefresh={props.onRefresh}
       onCollapseAll={props.onCollapseAll}
-      onOpenBrowser={props.onOpenBrowser}
       onOpenPalette={props.onOpenPalette}
       onChangeWorkspace={props.onChangeWorkspace}
       onGoHome={props.onGoHome}

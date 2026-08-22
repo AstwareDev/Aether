@@ -47,8 +47,11 @@ Rewritten to match VS Code's tree, and in places to go past it.
 - Configurable font, size, word wrap, minimap, and line numbers (absolute / relative / off)
 
 ### Browser
-- A built-in **Simple Browser** tab with an address bar, back/forward/reload and "open externally" — handy for watching a dev server next to the code that drives it
-- Opens from the Explorer toolbar or the command palette (`Browser: Open Simple Browser`); appears in Open Editors alongside your files
+- **Agent Browser** — a built-in browser tab with an address bar, back/forward/reload/home and "open externally", built to be driven by both you and the AI, not just a page viewer next to the code that drives it
+- **Element picker** — hover any element to copy a markdown report of it (tag, attributes, computed styles, and more), meant for handing straight to an AI agent as context
+- Custom, Aether-themed **DevTools** — the real inspector front-end, restyled to match the editor instead of clashing with it
+- **Start page** — recent addresses as one-click shortcuts, falling back to common local dev ports (`3000`, `5173`, `8080`, `4200`) on a cold start with none yet
+- Opens from the Topbar or the command palette (`Browser: Open Agent Browser`); appears in Open Editors alongside your files
 
 ### Viewers & editors
 - **Markdown** — three modes per file: rendered preview, visual (WYSIWYG) editor, and raw source
@@ -61,6 +64,7 @@ Rewritten to match VS Code's tree, and in places to go past it.
 - Commit history with a rendered commit graph
 - Push, set-upstream, checkout file, branch display, clone a repository from the welcome screen
 - **Agent Review** — an AI pass over the diff that surfaces issues as inline, jump-to-line annotations
+- Switch between Changes / History / Agent Review as a dropdown, tabs, or **Stacked** — all three as collapsible sections on one page — configurable in Settings
 
 ### Search
 - Full-text workspace search with regex, case-sensitivity, and whole-word toggles
